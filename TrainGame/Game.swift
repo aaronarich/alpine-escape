@@ -428,13 +428,14 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         ]
         mesh.ribbon(track: track, from: tStart, to: tEnd, step: 3.5, profile: boreProfile, color: boreDark, flip: true)
 
+        // Wide outer rock sleeves over the first & last 72m seamlessly bridge the hollow terrain portal cutouts.
         let sleeveProfile: [SIMD2<Float>] = [
-            SIMD2(-9.5, -3.0), SIMD2(-6.5, 5.4), SIMD2(-3.6, 9.2),
-            SIMD2(0, 10.6),    SIMD2(3.6, 9.2),  SIMD2(6.5, 5.4),
-            SIMD2(9.5, -3.0),
+            SIMD2(-19.0, -4.5), SIMD2(-11.0, 5.8), SIMD2(-5.2, 10.6),
+            SIMD2(0, 12.8),     SIMD2(5.2, 10.6),  SIMD2(11.0, 5.8),
+            SIMD2(19.0, -4.5),
         ]
-        mesh.ribbon(track: track, from: tStart + 0.8, to: tStart + 58, step: 4, profile: sleeveProfile, color: rockCap)
-        mesh.ribbon(track: track, from: tEnd - 58, to: tEnd - 0.8, step: 4, profile: sleeveProfile, color: rockCap)
+        mesh.ribbon(track: track, from: tStart + 0.4, to: tStart + 74, step: 4, profile: sleeveProfile, color: rockCap)
+        mesh.ribbon(track: track, from: tEnd - 74, to: tEnd - 0.4, step: 4, profile: sleeveProfile, color: rockCap)
 
         for (d, sign) in [(tStart, Float(-1)), (tEnd, Float(1))] {
             let f = track.frame(at: d)

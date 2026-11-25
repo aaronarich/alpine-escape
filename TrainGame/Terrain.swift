@@ -188,13 +188,32 @@ final class Terrain {
                     for i in iStart..<iEnd {
                         let p00 = vertex(i, j), p10 = vertex(i + 1, j)
                         let p01 = vertex(i, j + 1), p11 = vertex(i + 1, j + 1)
-                        mesh.tri(p00, p01, p10, groundColor(p00, p01, p10))
-                        mesh.tri(p10, p01, p11, groundColor(p10, p01, p11))
+                        if !blocksTunnelPortal(p00, p01, p10) {
+                            mesh.tri(p00, p01, p10, groundColor(p00, p01, p10))
+                        }
+                        if !blocksTunnelPortal(p10, p01, p11) {
+                            mesh.tri(p10, p01, p11, groundColor(p10, p01, p11))
+                        }
                     }
                 }
                 node.addChildNode(SCNNode(geometry: mesh.geometry(doubleSided: false, material: sharedMaterial)))
             }
         }
+    }
+
+    /// Returns true if a heightmap triangle slices vertically across either tunnel opening.
+    /// Skipping these triangles creates a genuinely hollow 3D portal (covered externally by the rock sleeve).
+    private func blocksTunnelPortal(_ a: V3, _ b: V3, _ c: V3) -> Bool {
+        let center = (a + b + c) / 3
+        let near = track.nearest(x: center.x, z: center.z)
+        guard near.distance < 17 else { return false }
+        let inStartZone = near.along >= track.tunnel.start - 4 && near.along <= track.tunnel.start + 66
+        let inEndZone = near.along >= track.tunnel.end - 66 && near.along <= track.tunnel.end + 4
+        guard inStartZone || inEndZone else { return false }
+        let minY = min(a.y, min(b.y, c.y))
+        let maxY = max(a.y, max(b.y, c.y))
+        // Only cut triangles that pass through the tunnel bore elevation (keep flat ground below and mountain peak above).
+        return maxY > near.y - 0.3 && minY < near.y + 9.5
     }
 
     private func groundColor(_ a: V3, _ b: V3, _ c: V3) -> RGBA {
