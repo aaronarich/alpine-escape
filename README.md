@@ -8,9 +8,10 @@ Every mountain, chalet, stone viaduct arch, snowflake, and steam whistle echo is
 
 ## Highlights
 
-- **Two 100% Procedural Worlds**:
-  - **Swiss Alps**: A ~4.2 km mountain loop connecting **Grindelwald**, **Kandersteg**, and **Andermatt** with snow-capped peaks, a turquoise lake with sailboats, a 12-arch Landwasser-style stone viaduct, an alpine mountain tunnel, Swiss chalet villages, and spruce/larch forests.
-  - **Tokyo**: Express tracks connecting **Shibuya**, **Shinjuku**, and **Tokyo Station** with colorful low-poly skyscrapers, glowing night office windows & neon rooftop signs, **Tokyo Tower** on a central bay park island, pink **sakura** cherry blossom trees, a neon-lit urban tunnel, and Mount Fuji on the horizon.
+- **Three 100% Procedural Worlds**:
+  - **Swiss Alps**: A ~4.2 km mountain loop connecting **Grindelwald**, **Kandersteg**, and **Andermatt** with snow-capped peaks, a turquoise lake with sailboats, a 12-arch Landwasser-style stone viaduct, an alpine mountain tunnel, Swiss chalet villages, grazing cows, and spruce/larch forests.
+  - **Tokyo**: Express tracks connecting **Shibuya**, **Shinjuku**, and **Tokyo Station** with colorful low-poly skyscrapers, glowing night office windows & neon rooftop signs, **Tokyo Tower** on a central bay park island, overhead Shinkansen catenary gantries, red Torii gates, pink **sakura** cherry blossom trees, a neon-lit urban tunnel, and Mount Fuji on the horizon.
+  - **Blue Ridge Mountains**: Rolling layered Appalachian ridges connecting **Asheville**, **Roanoke**, and **Shenandoah** with misty blue-green crests, rounded hardwood autumn/summer forests, 900+ trackside wildflower clusters, red timber barns, and log cabins.
 - **Three Switchable Train Types**:
   - **Steam Express**: Classic green-and-brass steam locomotive with animated quartered coupling rods, tender, and three red coaches (~97 km/h).
   - **Shinkansen Bullet**: Streamlined pearl-white & cobalt-blue bullet train with roof pantographs and sleek LED lighting (~202 km/h).
@@ -71,14 +72,16 @@ Switch to **Cab** camera (`◀` on Apple TV, `C` on Mac) to drive from behind a 
 | **M** or **Tab** | Open / Close **Express Menu** |
 | **H** | Toggle HUD Controls Hint |
 
-### Game Controller (Xbox / PlayStation)
+### Game Controller (Xbox One S / PlayStation)
 
 | Input | Action |
 | :--- | :--- |
-| **Left Stick / D-Pad ▲ ▼** | Throttle Up / Brake Down |
-| **A / Cross** | Train Horn |
-| **D-Pad ◀ / X (Square)** | Cycle Camera |
-| **D-Pad ▶ / R1 / L1** | Next / Previous Weather |
+| **Right Trigger (RT)** | Speed Up (Throttle Up) |
+| **Left Trigger (LT)** | Slow Down (Throttle Down / Brake) |
+| **Left Stick Click (L3)** | Train Horn *(3s max, 30s cooldown)* |
+| **D-Pad ▲ / ▼** | Cycle Camera Views *(or navigate menu)* |
+| **D-Pad ◀ / ▶** | Previous / Next Weather *(or adjust menu)* |
+| **Menu (☰)** | Open / Close **Express Menu** *(Landscape, Train, Time, Weather)* |
 | **Y (Triangle)** | Cycle Time of Day |
 
 ## Project Structure

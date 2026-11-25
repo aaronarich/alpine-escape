@@ -129,23 +129,34 @@ final class InputController {
             if (taps & RemoteButton.select.rawValue) != 0        { selectTapped = true }
         }
 
-        // 2. GameController framework (Extended gamepads & Siri Remote directional/micro gamepads).
+        // 2. GameController framework (Xbox One S / Extended gamepads & Siri Remote).
         for controller in GCController.controllers() {
             if let pad = controller.extendedGamepad {
-                let stickY = pad.leftThumbstick.yAxis.value
+                let dpadX = pad.dpad.xAxis.value
                 let dpadY = pad.dpad.yAxis.value
-                let y = abs(stickY) > abs(dpadY) ? stickY : dpadY
-                let x = pad.dpad.xAxis.value
-                wantUp = wantUp || y > 0.5
-                wantDown = wantDown || y < -0.5
-                wantLeft = wantLeft || x < -0.5
-                wantRight = wantRight || x > 0.5
-                wantCamera = wantCamera || pad.buttonX.isPressed
-                wantWeatherNext = wantWeatherNext || pad.rightShoulder.isPressed
-                wantWeatherPrev = wantWeatherPrev || pad.leftShoulder.isPressed
-                wantTime = wantTime || pad.buttonY.isPressed
-                wantMenu = wantMenu || pad.buttonMenu.isPressed
-                wantSelect = wantSelect || pad.buttonA.isPressed
+                let stickY = pad.leftThumbstick.yAxis.value
+                let stickX = pad.leftThumbstick.xAxis.value
+
+                if menuOpen {
+                    // In Express Menu: D-pad or left stick navigates & adjusts; A confirms; Menu/Options closes.
+                    wantUp = wantUp || dpadY > 0.5 || stickY > 0.5
+                    wantDown = wantDown || dpadY < -0.5 || stickY < -0.5
+                    wantLeft = wantLeft || dpadX < -0.5 || stickX < -0.5
+                    wantRight = wantRight || dpadX > 0.5 || stickX > 0.5
+                    wantSelect = wantSelect || pad.buttonA.isPressed
+                } else {
+                    // Driving with Xbox One S / Extended controller:
+                    // RT = speed up, LT = slow down, D-pad Up/Down = camera views,
+                    // D-pad Left/Right = weather, L3 (left-stick press) = horn, Menu = Express Menu.
+                    wantUp = wantUp || pad.rightTrigger.value > 0.35
+                    wantDown = wantDown || pad.leftTrigger.value > 0.35
+                    wantCamera = wantCamera || dpadY > 0.5 || dpadY < -0.5 || pad.buttonX.isPressed
+                    wantWeatherPrev = wantWeatherPrev || dpadX < -0.5 || pad.leftShoulder.isPressed
+                    wantWeatherNext = wantWeatherNext || dpadX > 0.5 || pad.rightShoulder.isPressed
+                    wantTime = wantTime || pad.buttonY.isPressed
+                    wantSelect = wantSelect || (pad.leftThumbstickButton?.isPressed ?? false)
+                }
+                wantMenu = wantMenu || pad.buttonMenu.isPressed || (pad.buttonOptions?.isPressed ?? false)
             } else if let remote = controller.microGamepad {
                 if let cardinal = remote.dpads[GCInputDirectionalCardinalDpad] {
                     wantUp = wantUp || cardinal.up.isPressed

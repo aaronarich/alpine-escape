@@ -336,6 +336,67 @@ struct MeshBuilder {
             half: V3(4.25 * scale, 0.16 * scale, 0.46 * scale), color: darkCap, includeBottom: false)
     }
 
+    /// Low-poly rounded Appalachian hardwood / deciduous tree (trunk + clustered faceted foliage crown).
+    mutating func hardwoodTree(base: V3, scale: Float, canopy: RGBA, rng: inout SeededRNG) {
+        let trunk = RGBA(0.34, 0.23, 0.14, 1)
+        cone(base: base - V3(0, 0.3, 0), radius: 0.48 * scale, height: 3.4 * scale, sides: 5, color: trunk)
+        let crownCenter = base + V3(0, 4.4 * scale, 0)
+        // Main faceted leafy crown + 2 slightly offset side lobes for organic Appalachian canopy
+        cloudPuff(center: crownCenter, radius: V3(2.8 * scale, 2.4 * scale, 2.8 * scale), color: canopy)
+        let ox = Float.random(in: -1.2...1.2, using: &rng) * scale
+        let oz = Float.random(in: -1.2...1.2, using: &rng) * scale
+        let shade2 = RGBA(canopy.x * 0.93, canopy.y * 0.93, canopy.z * 0.95, 1)
+        cloudPuff(center: crownCenter + V3(ox, -0.5 * scale, oz),
+                  radius: V3(2.0 * scale, 1.7 * scale, 2.0 * scale), color: shade2)
+    }
+
+    /// Vibrant cluster of trackside Appalachian wildflowers (leafy mound + 3 colorful blossoms).
+    mutating func wildflowerCluster(base: V3, scale: Float, bloom: RGBA, rng: inout SeededRNG) {
+        let up = V3(0, 1, 0), s = V3(1, 0, 0), f = V3(0, 0, 1)
+        let leaf = RGBA(0.18, 0.42, 0.16, 1)
+        box(center: base + V3(0, 0.20 * scale, 0), side: s, up: up, forward: f,
+            half: V3(0.65 * scale, 0.24 * scale, 0.65 * scale), color: leaf, includeBottom: false)
+        for _ in 0..<3 {
+            let ox = Float.random(in: -0.48...0.48, using: &rng) * scale
+            let oz = Float.random(in: -0.48...0.48, using: &rng) * scale
+            let bh = Float.random(in: 0.40...0.68, using: &rng) * scale
+            let br = Float.random(in: 0.16...0.26, using: &rng) * scale
+            box(center: base + V3(ox, bh, oz), side: s, up: up, forward: f,
+                half: V3(br, br * 0.85, br), color: bloom, includeBottom: false)
+        }
+    }
+
+    /// Classic Appalachian red timber barn with gambrel/pitched roof & glowing windows.
+    mutating func redBarn(base: V3, yaw: Float, scale: Float, windows: inout MeshBuilder) {
+        let fwd = V3(sin(yaw), 0, cos(yaw))
+        let side = V3(cos(yaw), 0, -sin(yaw))
+        let up = V3(0, 1, 0)
+        let red = RGBA(0.66, 0.15, 0.12, 1)
+        let trim = RGBA(0.95, 0.94, 0.90, 1)
+        let roof = RGBA(0.28, 0.27, 0.28, 1)
+        let hw: Float = 3.8 * scale, hl: Float = 5.2 * scale, hWall: Float = 4.2 * scale, hPeak: Float = 2.8 * scale
+
+        box(center: base + up * (hWall * 0.5 - 1.2 * scale), side: side, up: up, forward: fwd,
+            half: V3(hw, hWall * 0.5 + 1.2 * scale, hl), color: red, includeBottom: false)
+        // White X-braced barn door on front gable
+        box(center: base + up * (1.5 * scale) + fwd * (hl + 0.06 * scale), side: side, up: up, forward: fwd,
+            half: V3(1.5 * scale, 1.5 * scale, 0.08 * scale), color: trim, includeBottom: false)
+        // Gable triangles & pitched metal roof
+        func pt(_ sx: Float, _ sy: Float, _ sz: Float) -> V3 { base + side * sx + up * sy + fwd * sz }
+        tri(pt(-hw, hWall, hl), pt(hw, hWall, hl), pt(0, hWall + hPeak, hl), red)
+        tri(pt(hw, hWall, -hl), pt(-hw, hWall, -hl), pt(0, hWall + hPeak, -hl), red)
+        let ovX = hw + 0.7 * scale, ovZ = hl + 0.7 * scale, ovY = hWall - 0.25 * scale
+        quad(pt(0, hWall + hPeak + 0.2 * scale, -ovZ), pt(0, hWall + hPeak + 0.2 * scale, ovZ),
+             pt(ovX, ovY + 0.2 * scale, ovZ), pt(ovX, ovY + 0.2 * scale, -ovZ), roof)
+        quad(pt(0, hWall + hPeak + 0.2 * scale, ovZ), pt(0, hWall + hPeak + 0.2 * scale, -ovZ),
+             pt(-ovX, ovY + 0.2 * scale, -ovZ), pt(-ovX, ovY + 0.2 * scale, ovZ), roof)
+        // Loft window glowing warmly at night
+        let winCol = RGBA(1.0, 0.85, 0.45, 1)
+        let wy = hWall + hPeak * 0.42, ww: Float = 0.55 * scale
+        windows.quad(pt(-ww, wy - ww, hl + 0.08 * scale), pt(ww, wy - ww, hl + 0.08 * scale),
+                     pt(ww, wy + ww, hl + 0.08 * scale), pt(-ww, wy + ww, hl + 0.08 * scale), winCol)
+    }
+
     /// Sweeps a 2D profile (x = sideways, y = up) along the track with outward-facing normals.
     /// Set `flip = true` to invert normals inward (e.g. for a tunnel interior lining).
     mutating func ribbon(track: Track, from: Float, to: Float, step: Float,

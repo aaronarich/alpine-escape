@@ -49,6 +49,9 @@ final class Terrain {
             buildTokyoScenery(stationDistances: stationDistances)
             buildTokyoTower()
             buildSailboats()
+        case .blueRidge:
+            buildBlueRidgeScenery(stationDistances: stationDistances)
+            buildSailboats()
         }
     }
 
@@ -79,14 +82,14 @@ final class Terrain {
 
         let glow = clamp((nightLevel - 0.12) / 0.55, 0, 1)
         switch theme {
-        case .alps:
+        case .alps, .blueRidge:
             warmWindowMaterial.emission.contents = rgb(1.0 * glow, 0.72 * glow, 0.28 * glow)
             warmWindowMaterial.diffuse.contents = rgb(
                 lerp(0.16, 1.0, glow),
                 lerp(0.22, 0.80, glow),
                 lerp(0.30, 0.42, glow)
             )
-            let baseWater = V3(0.11, 0.36, 0.50)
+            let baseWater = theme == .blueRidge ? V3(0.12, 0.34, 0.46) : V3(0.11, 0.36, 0.50)
             let blended = lerp(baseWater, skyHorizon * V3(0.45, 0.55, 0.65), 0.35)
             waterMaterial.diffuse.contents = rgb(blended.x, blended.y, blended.z)
         case .tokyo:
@@ -148,6 +151,20 @@ final class Terrain {
             let fuji = 460 * pow(max(0, 1 - fujiDist / 680), 1.65)
             let urbanHill = 32 * tunnelAlong * tunnelAcross
             h = baseY + gentle - bayBowl + towerIsland + fuji + urbanHill
+
+        case .blueRidge:
+            // Ancient, softly rolling layered Appalachian ridges (broader and gentler than Alpine spires)
+            let corridor = smoothstep(28, 145, dist)
+            let baseY = lerp(trackY - 1.0, 38, smoothstep(110, 420, dist))
+            let rolling = (Noise.fbm(x * 0.0055 + 4.2, z * 0.0055 + 8.1, octaves: 3) - 0.5) * 30 * corridor
+            let ridgeMask = smoothstep(65, 580, dist) * smoothstep(115, 390, centerDist)
+            // Layered rolling waves give the signature multi-ridge Appalachian silhouette
+            let waveA = Noise.fbm(x * 0.0012 + 2.1, z * 0.0012 + 5.7, octaves: 4)
+            let waveB = 0.5 + 0.5 * sin(x * 0.0042 + z * 0.0028 + waveA * 3.5)
+            let appalachianRidges = (pow(waveA, 1.2) * 320 + waveB * 95) * ridgeMask
+            let valleyLake = 42 * (1 - smoothstep(0, 320, centerDist))
+            let tunnelHill = (42 + waveA * 22) * tunnelAlong * tunnelAcross
+            h = baseY + rolling + appalachianRidges - valleyLake + tunnelHill
         }
 
         if gorgeMask > 0 {
@@ -262,6 +279,24 @@ final class Terrain {
             }
             let asphalt = 0.34 + tint * 0.07
             return RGBA(asphalt, asphalt * 1.01, asphalt * 1.05, 1)
+
+        case .blueRidge:
+            // Lush Appalachian valley greens blending smoothly into misty blue-green ridges!
+            if center.y < Terrain.waterLevel + 1.8 {
+                return RGBA(0.56, 0.50, 0.38, 1) // sandy river bank
+            }
+            if normal.y < 0.70 {
+                // Weathered Appalachian granite/slate outcrop
+                let g = 0.38 + tint * 0.10
+                return RGBA(g * 0.94, g * 0.96, g * 1.04, 1)
+            }
+            let alt = smoothstep(42, 235, center.y)
+            let valleyGreen = V3(0.24, 0.48, 0.22) + V3(0.08, 0.09, 0.04) * tint
+            let midBlueGreen = V3(0.22, 0.38, 0.34) + V3(0.05, 0.06, 0.07) * tint
+            let blueRidgeCrest = V3(0.24, 0.34, 0.48) + V3(0.04, 0.05, 0.08) * tint
+            let c1 = lerp(valleyGreen, midBlueGreen, smoothstep(0.0, 0.55, alt))
+            let c2 = lerp(c1, blueRidgeCrest, smoothstep(0.45, 1.0, alt))
+            return RGBA(c2.x, c2.y, c2.z, 1)
         }
     }
 
@@ -513,6 +548,195 @@ final class Terrain {
         }
 
         finalizeSceneryChunks(chunks: chunks, windows: chaletWindows, neon: MeshBuilder())
+    }
+
+    // MARK: Blue Ridge Mountains (Appalachian Forest, Wildflowers, Red Barns & Log Cabins)
+
+    private func buildBlueRidgeScenery(stationDistances: [Float]) {
+        var rng = SeededRNG(seed: 1776)
+        var chunks = [MeshBuilder](repeating: MeshBuilder(), count: chunkGrid * chunkGrid)
+        var cabinWindows = MeshBuilder()
+
+        // 1. Rustic Appalachian log cabins & classic red timber barns near Asheville, Roanoke & Shenandoah
+        var placedBuildings: [V3] = []
+        let anchors: [Float] = stationDistances + [track.length * 0.80]
+        let cabinWalls: [RGBA] = [RGBA(0.46, 0.30, 0.18, 1), RGBA(0.56, 0.38, 0.24, 1), RGBA(0.68, 0.56, 0.42, 1)]
+        let cabinRoofs: [RGBA] = [RGBA(0.24, 0.32, 0.24, 1), RGBA(0.32, 0.24, 0.20, 1), RGBA(0.44, 0.20, 0.16, 1)]
+
+        for anchor in anchors {
+            var count = 0, tries = 0
+            while count < 9 && tries < 180 {
+                tries += 1
+                let along = track.wrap(anchor + Float.random(in: -150...130, using: &rng))
+                let lateral = Float.random(in: 28...118, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+                let f = track.frame(at: along)
+                let x = f.position.x + f.side.x * lateral
+                let z = f.position.z + f.side.z * lateral
+                guard abs(x) < size * 0.46, abs(z) < size * 0.46 else { continue }
+                let h = height(x: x, z: z)
+                guard h > Terrain.waterLevel + 4.0, h < 115 else { continue }
+                guard abs(height(x: x + 6, z: z) - h) < 2.6, abs(height(x: x, z: z + 6) - h) < 2.6 else { continue }
+                let near = track.nearest(x: x, z: z)
+                guard near.distance > 25 else { continue }
+                if near.distance < 40 && stationDistances.contains(where: { abs(track.signedDelta(from: near.along, to: $0 - 43)) < 36 }) { continue }
+                let pos = V3(x, h, z)
+                if placedBuildings.contains(where: { simd_distance($0, pos) < 18 }) { continue }
+
+                let idx = chunkIndex(x: x, z: z)
+                let yaw = atan2(f.forward.x, f.forward.z) + Float.random(in: -0.45...0.45, using: &rng)
+                if count % 3 == 0 {
+                    chunks[idx].redBarn(base: pos, yaw: yaw, scale: Float.random(in: 0.9...1.2, using: &rng), windows: &cabinWindows)
+                } else {
+                    chunks[idx].chalet(base: pos, yaw: yaw, scale: Float.random(in: 0.85...1.15, using: &rng),
+                                       wall: cabinWalls.randomElement(using: &rng)!,
+                                       roof: cabinRoofs.randomElement(using: &rng)!,
+                                       snowRoof: false, windows: &cabinWindows)
+                }
+                placedBuildings.append(pos)
+                count += 1
+            }
+        }
+
+        // 2. Dense Appalachian Hardwood & Hemlock Forest (vibrant crimson maples, golden poplars,
+        //    burnt-orange oaks, deep emerald canopy, and blue-green pines!)
+        let hardwoodColors: [RGBA] = [
+            RGBA(0.16, 0.44, 0.20, 1), // lush Appalachian oak green
+            RGBA(0.22, 0.50, 0.24, 1), // bright summer leaf green
+            RGBA(0.14, 0.36, 0.28, 1), // blue-green ridge canopy
+            RGBA(0.78, 0.22, 0.14, 1), // crimson sugar maple
+            RGBA(0.88, 0.44, 0.12, 1), // burnt-orange hickory
+            RGBA(0.90, 0.72, 0.16, 1), // golden tulip poplar
+        ]
+        var placedTrees = 0, attempts = 0
+        while placedTrees < 2100 && attempts < 30000 {
+            attempts += 1
+            var x: Float, z: Float
+            if attempts % 3 != 0 {
+                let f = track.frame(at: Float.random(in: 0..<track.length, using: &rng))
+                let lateral = Float.random(in: 17...210, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+                x = f.position.x + f.side.x * lateral
+                z = f.position.z + f.side.z * lateral
+            } else {
+                x = Float.random(in: -size * 0.47...size * 0.47, using: &rng)
+                z = Float.random(in: -size * 0.47...size * 0.47, using: &rng)
+            }
+            guard abs(x) < size * 0.48, abs(z) < size * 0.48 else { continue }
+            let h = height(x: x, z: z)
+            guard h > Terrain.waterLevel + 2.5, h < 235 else { continue }
+            guard abs(height(x: x + 5, z: z) - h) < 5.0, abs(height(x: x, z: z + 5) - h) < 5.0 else { continue }
+            guard Noise.fbm(x * 0.010 + 5, z * 0.010 + 13, octaves: 2) > 0.36 else { continue }
+
+            let near = track.nearest(x: x, z: z)
+            let onTunnelRoof = track.isInTunnel(near.along) && h > near.y + 14
+            if !onTunnelRoof {
+                guard near.distance > 16 else { continue }
+                if near.distance < 32 && stationDistances.contains(where: { abs(track.signedDelta(from: near.along, to: $0 - 43)) < 58 }) { continue }
+            }
+            if placedBuildings.contains(where: { (x - $0.x) * (x - $0.x) + (z - $0.z) * (z - $0.z) < 140 }) { continue }
+
+            let idx = chunkIndex(x: x, z: z)
+            let s = Float.random(in: 0.85...1.55, using: &rng)
+            if Float.random(in: 0...1, using: &rng) < 0.72 {
+                // Rounded Appalachian deciduous hardwood tree!
+                let col = hardwoodColors.randomElement(using: &rng)!
+                chunks[idx].hardwoodTree(base: V3(x, h, z), scale: s, canopy: col, rng: &rng)
+            } else {
+                // Eastern hemlock / Blue Ridge spruce accent
+                let g = Float.random(in: 0...0.06, using: &rng)
+                let pine = RGBA(0.09 + g, 0.30 + g, 0.22 + g, 1)
+                chunks[idx].cone(base: V3(x, h - 0.3, z), radius: 0.45 * s, height: 2.4 * s, sides: 5,
+                                 color: RGBA(0.32, 0.21, 0.12, 1))
+                chunks[idx].cone(base: V3(x, h + 1.4 * s, z), radius: 2.6 * s, height: 4.8 * s, sides: 6, color: pine)
+                chunks[idx].cone(base: V3(x, h + 4.2 * s, z), radius: 1.8 * s, height: 4.3 * s, sides: 6, color: pine)
+            }
+            placedTrees += 1
+        }
+
+        // 3. Abundant Appalachian Wildflowers blooming right along BOTH sides of the tracks!
+        let wildflowerPalette: [RGBA] = [
+            RGBA(0.99, 0.82, 0.12, 1), // Black-eyed Susan gold
+            RGBA(0.96, 0.42, 0.68, 1), // Mountain Laurel / Rhododendron pink
+            RGBA(0.64, 0.36, 0.96, 1), // Wild Bergamot / Purple Aster
+            RGBA(0.98, 0.46, 0.14, 1), // Butterfly Weed orange
+            RGBA(0.98, 0.97, 0.94, 1), // White Trillium
+            RGBA(0.34, 0.68, 0.98, 1), // Virginia Bluebell
+        ]
+        for _ in 0..<920 {
+            let d = Float.random(in: 0..<track.length, using: &rng)
+            guard !track.isOnViaduct(d, margin: 6), !track.isInTunnel(d, margin: 10) else { continue }
+            let f = track.frame(at: d)
+            // Concentrate wildflowers right beside the rails (6.8m...34m) so they shine in Cab & Chase views!
+            let lateral = Float.random(in: 6.8...34.0, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+            let x = f.position.x + f.side.x * lateral
+            let z = f.position.z + f.side.z * lateral
+            guard abs(x) < size * 0.46, abs(z) < size * 0.46 else { continue }
+            let h = height(x: x, z: z)
+            guard h > Terrain.waterLevel + 2.5, h < 120 else { continue }
+            let near = track.nearest(x: x, z: z)
+            guard near.distance > 6.4 else { continue }
+            if near.distance < 15 && stationDistances.contains(where: { abs(track.signedDelta(from: near.along, to: $0 - 43)) < 55 }) { continue }
+
+            let bloom = wildflowerPalette.randomElement(using: &rng)!
+            let s = Float.random(in: 0.85...1.65, using: &rng)
+            chunks[chunkIndex(x: x, z: z)].wildflowerCluster(base: V3(x, h, z), scale: s, bloom: bloom, rng: &rng)
+        }
+
+        // 4. Grazing pasture cows & split-rail fences
+        let fenceWood = RGBA(0.46, 0.34, 0.22, 1)
+        var cows = 0, cTries = 0
+        while cows < 36 && cTries < 600 {
+            cTries += 1
+            let f = track.frame(at: Float.random(in: 0..<track.length, using: &rng))
+            let lateral = Float.random(in: 19...75, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+            let x = f.position.x + f.side.x * lateral
+            let z = f.position.z + f.side.z * lateral
+            guard abs(x) < size * 0.45, abs(z) < size * 0.45 else { continue }
+            let h = height(x: x, z: z)
+            guard h > Terrain.waterLevel + 4.0, h < 90 else { continue }
+            guard abs(height(x: x + 4, z: z) - h) < 1.8, abs(height(x: x, z: z + 4) - h) < 1.8 else { continue }
+            let near = track.nearest(x: x, z: z)
+            guard near.distance > 17 else { continue }
+            let idx = chunkIndex(x: x, z: z)
+            chunks[idx].cow(base: V3(x, h, z), yaw: Float.random(in: 0..<(2 * .pi), using: &rng), brown: Bool.random(using: &rng))
+            if cows % 3 == 0 {
+                let ffwd = V3(f.forward.x, 0, f.forward.z)
+                let fNorm = simd_length(ffwd) > 0.01 ? simd_normalize(ffwd) : V3(0, 0, 1)
+                let fSide = simd_cross(V3(0, 1, 0), fNorm)
+                let fb = V3(x, h, z) - f.side * (lateral > 0 ? 5.2 : -5.2)
+                for p: Float in [-4.5, 0, 4.5] {
+                    chunks[idx].box(center: fb + fNorm * p + V3(0, 0.55, 0), side: fSide, up: V3(0, 1, 0), forward: fNorm,
+                                    half: V3(0.09, 0.65, 0.09), color: fenceWood, includeBottom: false)
+                }
+                for ry: Float in [0.42, 0.88] {
+                    chunks[idx].box(center: fb + V3(0, ry, 0), side: fSide, up: V3(0, 1, 0), forward: fNorm,
+                                    half: V3(0.06, 0.07, 4.7), color: fenceWood, includeBottom: false)
+                }
+            }
+            cows += 1
+        }
+
+        // 5. Weathered mossy Appalachian boulders along creeks and slopes
+        var rocks = 0, rTries = 0
+        while rocks < 200 && rTries < 2000 {
+            rTries += 1
+            let f = track.frame(at: Float.random(in: 0..<track.length, using: &rng))
+            let lateral = Float.random(in: 13...150, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+            let x = f.position.x + f.side.x * lateral
+            let z = f.position.z + f.side.z * lateral
+            guard abs(x) < size * 0.47, abs(z) < size * 0.47 else { continue }
+            let h = height(x: x, z: z)
+            guard h > Terrain.waterLevel + 0.5, h < 190 else { continue }
+            guard abs(height(x: x + 4, z: z) - h) < 2.6, abs(height(x: x, z: z + 4) - h) < 2.6 else { continue }
+            let near = track.nearest(x: x, z: z)
+            guard near.distance > 12 else { continue }
+            let shade = Float.random(in: 0.36...0.48, using: &rng)
+            let rx = Float.random(in: 1.3...3.5, using: &rng), ry = Float.random(in: 0.9...2.4, using: &rng), rz = Float.random(in: 1.3...3.5, using: &rng)
+            chunks[chunkIndex(x: x, z: z)].rock(center: V3(x, h + ry * 0.15, z), scale: V3(rx, ry, rz),
+                                                color: RGBA(shade * 0.95, shade * 1.0, shade * 1.02, 1), rng: &rng)
+            rocks += 1
+        }
+
+        finalizeSceneryChunks(chunks: chunks, windows: cabinWindows, neon: MeshBuilder())
     }
 
     // MARK: Tokyo Urban Skyline Scenery

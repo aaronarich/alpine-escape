@@ -2,19 +2,21 @@ import simd
 
 /// Selectable world landscapes.
 enum WorldTheme: Int, CaseIterable {
-    case alps, tokyo
+    case alps, tokyo, blueRidge
 
     var title: String {
         switch self {
-        case .alps:  return "Swiss Alps"
-        case .tokyo: return "Tokyo"
+        case .alps:      return "Swiss Alps"
+        case .tokyo:     return "Tokyo"
+        case .blueRidge: return "Blue Ridge"
         }
     }
 
     var symbol: String {
         switch self {
-        case .alps:  return "mountain.2.fill"
-        case .tokyo: return "building.2.fill"
+        case .alps:      return "mountain.2.fill"
+        case .tokyo:     return "building.2.fill"
+        case .blueRidge: return "leaf.fill"
         }
     }
 
@@ -24,6 +26,8 @@ enum WorldTheme: Int, CaseIterable {
             return [("Grindelwald", 0.03), ("Kandersteg", 0.36), ("Andermatt", 0.69)]
         case .tokyo:
             return [("Shibuya", 0.03), ("Shinjuku", 0.36), ("Tokyo Station", 0.69)]
+        case .blueRidge:
+            return [("Asheville", 0.03), ("Roanoke", 0.36), ("Shenandoah", 0.69)]
         }
     }
 
@@ -33,6 +37,8 @@ enum WorldTheme: Int, CaseIterable {
             return ["Alpine Timber", "Swiss Cheese", "Mountain Gear", "Express Mail"]
         case .tokyo:
             return ["Electronics", "Ramen Crates", "Robotics Parts", "Express Parcels"]
+        case .blueRidge:
+            return ["Virginia Apples", "Blue Ridge Lumber", "Appalachian Coal", "Craft Cider"]
         }
     }
 }
@@ -213,6 +219,8 @@ final class Track {
             y = 40 + 8 * sin(2 * a + 0.4) + 3 * sin(3 * a + 1.0)
         case .tokyo:
             y = 26 + 3.0 * sin(2 * a + 0.4) + 1.2 * sin(3 * a + 1.0)
+        case .blueRidge:
+            y = 36 + 7 * sin(2 * a + 0.9) + 3.5 * sin(3 * a + 0.3)
         }
         return V3(cos(a) * r, y, sin(a) * r)
     }

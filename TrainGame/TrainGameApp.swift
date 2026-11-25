@@ -234,10 +234,10 @@ struct HUDView: View {
 
     #if os(tvOS)
     private let unit: CGFloat = 1.5
-    private let hints = "▲ ▼ Throttle   ·   Center: Horn   ·   ◀ Camera   ·   ▶ Weather   ·   ⏯ Menu (World & Train)"
+    private let hints = "RT / LT (or ▲ ▼): Throttle   ·   L3 / Center: Horn   ·   D-Pad: Views & Weather   ·   ☰ / ⏯: Menu"
     #else
     private let unit: CGFloat = 1.0
-    private let hints = "↑ ↓ Throttle   ·   Space: Horn   ·   C: Camera   ·   L: Alps/Tokyo   ·   1-3: Train   ·   M: Menu"
+    private let hints = "↑ ↓ Throttle   ·   Space: Horn   ·   C: Camera   ·   L: World   ·   1-3: Train   ·   M: Menu"
     #endif
 
     private func font(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {
@@ -306,6 +306,15 @@ struct HUDView: View {
                                 Text("km/h").font(font(13)).opacity(0.7)
                             }
                             .frame(minWidth: 86 * unit, alignment: .leading)
+                            if hud.hornCooldownSeconds > 0 {
+                                Label("\(hud.hornCooldownSeconds)s", systemImage: "speaker.slash.fill")
+                                    .font(font(13, .bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.white.opacity(0.75))
+                                    .padding(.horizontal, 10 * unit)
+                                    .padding(.vertical, 5 * unit)
+                                    .background(.white.opacity(0.14), in: Capsule())
+                            }
                         }
                     }
                     Spacer()

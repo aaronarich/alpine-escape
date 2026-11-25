@@ -49,6 +49,7 @@ struct HUDState: Equatable {
     var showHints = true
     var menuOpen = false
     var menuRow = 0
+    var hornCooldownSeconds = 0
     var confettiTrigger = 0
 }
 
@@ -60,6 +61,8 @@ final class GameModel {
 final class Game: NSObject, SCNSceneRendererDelegate {
     static let maxNotch = 4
     static let minNotch = -3
+    static let maxHornDuration: Float = 3.0
+    static let hornCooldownDuration: Float = 30.0
 
     let scene = SCNScene()
     let model = GameModel()
@@ -130,6 +133,9 @@ final class Game: NSObject, SCNSceneRendererDelegate {
 
     private var menuOpen = false
     private var menuRow = 0
+    private var hornActiveTime: Float = 0
+    private var hornCooldown: Float = 0
+    private var wasHornSounding = false
 
     private var cameraMode = CameraMode.chase
     private var cameraPosition = V3(0, 0, 0)
@@ -163,7 +169,14 @@ final class Game: NSObject, SCNSceneRendererDelegate {
     var inputEnabled = true
 
     override init() {
-        let initialTheme: WorldTheme = .alps
+        let argWorld = UserDefaults.standard.string(forKey: "world")?.lowercased()
+        let initialTheme: WorldTheme
+        switch argWorld {
+        case "tokyo":     initialTheme = .tokyo
+        case "blueridge": initialTheme = .blueRidge
+        default:          initialTheme = .alps
+        }
+        theme = initialTheme
         let builtTrack = Track(theme: initialTheme)
         track = builtTrack
         terrain = Terrain(track: builtTrack, theme: initialTheme,
@@ -329,9 +342,17 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         var mesh = MeshBuilder()
         let vStart = track.viaduct.start
         let vEnd = track.viaduct.end
-        let stone = theme == .tokyo ? RGBA(0.75, 0.77, 0.80, 1) : RGBA(0.66, 0.63, 0.57, 1)
-        let stoneDark = theme == .tokyo ? RGBA(0.62, 0.64, 0.68, 1) : RGBA(0.56, 0.53, 0.48, 1)
-        let stoneTrim = theme == .tokyo ? RGBA(0.84, 0.86, 0.90, 1) : RGBA(0.74, 0.71, 0.65, 1)
+        let stone: RGBA
+        let stoneDark: RGBA
+        let stoneTrim: RGBA
+        switch theme {
+        case .tokyo:
+            stone = RGBA(0.75, 0.77, 0.80, 1); stoneDark = RGBA(0.62, 0.64, 0.68, 1); stoneTrim = RGBA(0.84, 0.86, 0.90, 1)
+        case .blueRidge:
+            stone = RGBA(0.56, 0.44, 0.36, 1); stoneDark = RGBA(0.45, 0.35, 0.28, 1); stoneTrim = RGBA(0.66, 0.54, 0.45, 1)
+        case .alps:
+            stone = RGBA(0.66, 0.63, 0.57, 1); stoneDark = RGBA(0.56, 0.53, 0.48, 1); stoneTrim = RGBA(0.74, 0.71, 0.65, 1)
+        }
 
         mesh.ribbon(track: track, from: vStart - 2, to: vEnd + 2, step: 2.5,
                     profile: [SIMD2(-3.0, -1.6), SIMD2(-3.0, 0.02), SIMD2(3.0, 0.02), SIMD2(3.0, -1.6)],
@@ -967,7 +988,27 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         let power: Float = notch > 0 ? Float(notch) / Float(Game.maxNotch) : 0
         let brake: Float = notch < 0 ? Float(-notch) / Float(-Game.minNotch) : 0
 
-        train.updateEffects(power: power, speed: speed, hornOn: commands.horn,
+        // Enforce 3-second maximum horn blast followed by a 30-second cooldown.
+        var effectiveHorn = false
+        if hornCooldown > 0 {
+            hornCooldown = max(0, hornCooldown - dt)
+        } else if commands.horn {
+            hornActiveTime += dt
+            if hornActiveTime >= Game.maxHornDuration {
+                hornCooldown = Game.hornCooldownDuration
+                hornActiveTime = 0
+                wasHornSounding = false
+            } else {
+                effectiveHorn = true
+                wasHornSounding = true
+            }
+        } else if wasHornSounding {
+            hornCooldown = Game.hornCooldownDuration
+            hornActiveTime = 0
+            wasHornSounding = false
+        }
+
+        train.updateEffects(power: power, speed: speed, hornOn: effectiveHorn,
                             nightLevel: weatherFX.nightLevel, tunnelFactor: tunnelAmt,
                             fogFactor: weatherFX.fogLevel, time: time)
         cabDashboard.root.isHidden = cameraMode != .cab
@@ -975,7 +1016,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             let lampOn = max(weatherFX.nightLevel, max(tunnelAmt, weatherFX.fogLevel * 0.65)) > 0.25
             let precip = max(weatherFX.rainLevel, weatherFX.snowLevel) * max(0, 1 - tunnelAmt * 1.5)
             cabDashboard.update(dt: dt, speedNorm: speed / train.kind.maxSpeed, notch: notch,
-                                hornOn: commands.horn, headlightOn: lampOn,
+                                hornOn: effectiveHorn, headlightOn: lampOn,
                                 signalState: cabSignalState, precipLevel: precip, time: time)
         }
         terrain.update(time: time, nightLevel: weatherFX.nightLevel, skyHorizon: weatherFX.currentSkyHorizon)
@@ -983,7 +1024,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             station.setNightGlow(max(weatherFX.nightLevel, weatherFX.fogLevel * 0.45))
         }
 
-        audio.update(speed: speed, power: power, brake: brake, hornOn: commands.horn,
+        audio.update(speed: speed, power: power, brake: brake, hornOn: effectiveHorn,
                      rain: weatherFX.rainLevel, wind: weatherFX.windLevel,
                      night: weatherFX.nightLevel, viaduct: viaductAmt,
                      tunnel: tunnelAmt, wash: washAmt, crossingBell: crossingBellAmt,
@@ -1042,7 +1083,8 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             flash("Time · \(label)", seconds: 1.8)
         }
         if commands.switchWorld {
-            let next: WorldTheme = theme == .alps ? .tokyo : .alps
+            let all = WorldTheme.allCases
+            let next = all[(theme.rawValue + 1) % all.count]
             switchWorld(to: next)
             flash("Landscape · \(next.title)", seconds: 2.2)
         }
@@ -1198,6 +1240,27 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             let drag: Float = train.kind == .bullet ? 0.00028 : 0.0006
             acceleration -= 0.03 + drag * speed * speed
         }
+
+        // Smart Depot Auto-Stop Assist:
+        // When rolling into the next station with the throttle closed (notch <= 0), gently guide the
+        // train to a smooth stop right inside the platform stop zone. If throttle is open (notch > 0),
+        // the player can blow straight through the station undisturbed!
+        if notch <= 0 && speed > 0 {
+            let station = stations[nextIndex]
+            let delta = track.signedDelta(from: head, to: station.distance)
+            let assistRange: Float = train.kind == .bullet ? 260 : 165
+            if delta > -Station.stopPast && delta < assistRange {
+                let targetDist = max(delta - 2.0, 1.5)
+                let idealDecel = (speed * speed) / (2.0 * targetDist)
+                let assistBrake = clamp(idealDecel * 1.15, 0.45, train.kind.maxBrake * 1.5)
+                acceleration = min(acceleration, -assistBrake)
+                if delta <= Station.stopShort && speed < 1.1 {
+                    speed = 0
+                    acceleration = 0
+                }
+            }
+        }
+
         speed = max(0, speed + acceleration * dt)
         head = track.wrap(head + speed * dt)
         odometer += speed * dt
@@ -1392,6 +1455,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         state.showHints = hintsOverride ?? (time < 30)
         state.menuOpen = menuOpen
         state.menuRow = menuRow
+        state.hornCooldownSeconds = Int(ceil(hornCooldown))
         state.confettiTrigger = confettiTrigger
 
         switch mode {
@@ -1411,7 +1475,9 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         } else if dwellUntil != nil {
             state.banner = train.kind == .freight ? "\(station.name) · loading cargo" : "\(station.name) · doors open"
         } else if delta <= Station.stopShort && speed > 0.05 {
-            state.banner = "🟢 Stop here!"
+            state.banner = notch <= 0 ? "🟢 Stopping at \(station.name)…" : "🟢 Stop here!"
+        } else if delta < 155 && speed > 1.5 && notch <= 0 {
+            state.banner = "🟢 Auto-stopping at \(station.name)…"
         } else if delta < 145 && speed > 3.5 {
             state.banner = "🔴 Brake now for \(station.name)!"
         } else if delta < (train.kind == .bullet ? 480 : 320) && speed > 6 {
