@@ -2,43 +2,42 @@ import AVFoundation
 import os
 
 /// Compact 2-pole Chamberlin State-Variable Filter (zero allocations, real-time safe).
-/// Shapes noise and impulses into warm resonant bodies instead of raw white-noise static.
 private struct SVF {
     var lp: Float = 0
     var bp: Float = 0
 
-    /// Processes one sample with normalized frequency `f` (~2*sin(pi*fc/sr), clamped < 0.85)
-    /// and damping `q` (smaller = more resonant, e.g. 0.15...1.2).
     @inline(__always)
     mutating func process(_ input: Float, f: Float, q: Float) -> (lp: Float, bp: Float, hp: Float) {
         let hp = input - lp - q * bp
         bp += f * hp
         lp += f * bp
-        // Gentle safety clamp prevents numerical blowup at extreme modulation.
         bp = clamp(bp, -8, 8)
         lp = clamp(lp, -8, 8)
         return (lp, bp, hp)
     }
 }
 
-/// Real-time procedural stereo soundscape for Alpine Express:
-/// - Warm resonant steam locomotive (deep cylinder chuffs, boiler simmer, air pump, valve rhythm)
-/// - Metallic steel-on-steel bogie clickety-clack & viaduct/tunnel rolling acoustics
-/// - Expressive 3-chime brass steam whistle with pitch scoop & stereo alpine/tunnel echo
-/// - Realistic air brakes & pneumatic stop release
-/// - Living alpine environment (songbirds by day, crickets at night, pine breeze, raindrop patter, rolling thunder)
-/// - Harmonic Swiss station departure bell
+/// Real-time procedural stereo soundscape for Alpine Express & Tokyo Express:
+/// - Distinct engines: punchy Steam chugga-chugga, musical Japanese Shinkansen VVVF inverter hum,
+///   and deep Cargo Freight diesel-electric prime mover thrum
+/// - Train-specific horns (brass steam chime, bright Japanese electric dual-tone, deep freight air horn)
+/// - Metallic bogie clickety-clack, viaduct/tunnel acoustics, bubbly Train Wash spray
+/// - Swiss station bell (Alps) & Tokyo Hassha departure melody (Tokyo)
+/// - Living environment: songbirds by day, crickets at night, pine breeze, raindrops, rolling thunder
 final class TrainAudio {
     private struct Params {
-        var speed: Float = 0        // metres per second
-        var power: Float = 0        // 0...1, engine effort
-        var brake: Float = 0        // 0...1, braking force
+        var speed: Float = 0
+        var power: Float = 0
+        var brake: Float = 0
         var hornOn = false
         var rain: Float = 0
         var wind: Float = 0
-        var night: Float = 0        // 0 = day, 1 = night
-        var viaduct: Float = 0      // 0...1, bridge resonance
-        var tunnel: Float = 0       // 0...1, enclosed tunnel acoustics
+        var night: Float = 0
+        var viaduct: Float = 0
+        var tunnel: Float = 0
+        var wash: Float = 0
+        var trainKind: Int = 0      // 0 = steam, 1 = bullet, 2 = freight
+        var isUrban = false
         var thunderRequests: UInt32 = 0
         var bellRequests: UInt32 = 0
     }
@@ -50,30 +49,38 @@ final class TrainAudio {
     private var source: AVAudioSourceNode?
     private var sampleRate: Float = 48000
 
-    // Synth state — touched exclusively by the audio render thread.
+    // Synth state — audio render thread only.
     private var seed: UInt32 = 0x1234_5678
     private var sSpeed: Float = 0, sPower: Float = 0, sBrake: Float = 0
     private var sRain: Float = 0, sWind: Float = 0, sNight: Float = 0
-    private var sViaduct: Float = 0, sTunnel: Float = 0
+    private var sViaduct: Float = 0, sTunnel: Float = 0, sWash: Float = 0
     private var wasBrakingMoving = false
 
-    // 1. Steam locomotive (deep exhaust chuff + breathy valve puff + boiler simmer + idle air pump)
+    // 1a. Steam locomotive (punchy pitched cylinder boom + tight resonant steam puff + side rod tap)
     private var chuffPhase: Float = 0
     private var chuffIndex = 0
-    private var chuffBodyEnv: Float = 0
+    private var chuffBoomEnv: Float = 0
     private var chuffPuffEnv: Float = 0
-    private var chuffClickEnv: Float = 0
-    private var chuffBodyFilter = SVF()
+    private var chuffRodEnv: Float = 0
+    private var chuffBoomPhase: Float = 0
+    private var chuffRodPhase: Float = 0
     private var chuffPuffFilter = SVF()
-    private var chuffSubPhase: Float = 0
     private var simmerFilter = SVF()
-    private var airPumpTimer: Float = 1.4
+    private var airPumpTimer: Float = 1.5
     private var airPumpEnv: Float = 0
     private var airPumpPhase: Float = 0
 
+    // 1b. Shinkansen Bullet VVVF electric inverter & aerodynamic glide
+    private var vvvfP1: Float = 0, vvvfP2: Float = 0, vvvfP3: Float = 0
+    private var aeroFilterL = SVF(), aeroFilterR = SVF()
+
+    // 1c. Freight diesel-electric prime mover
+    private var dieselCylPhase: Float = 0
+    private var dieselTonePhase: Float = 0
+    private var dieselFilter = SVF()
+
     // 2. Steel rail rolling hum & paired metallic bogie clickety-clack
-    private var rollFilterL = SVF()
-    private var rollFilterR = SVF()
+    private var rollFilterL = SVF(), rollFilterR = SVF()
     private var tunnelResFilter = SVF()
     private var jointPhase: Float = 0
     private var bogieStep = 0
@@ -89,7 +96,7 @@ final class TrainAudio {
     private var airReleaseEnv: Float = 0
     private var airReleaseFilter = SVF()
 
-    // 4. Three-chime brass steam whistle + stereo alpine valley / tunnel echo
+    // 4. Train horn + stereo valley/city/tunnel echo
     private var hornEnv: Float = 0
     private var hornPitchEnv: Float = 0
     private var hornP0: Float = 0, hornP1: Float = 0, hornP2: Float = 0
@@ -102,19 +109,27 @@ final class TrainAudio {
     private var echoWrite = 0
     private var echoLP: Float = 0
 
-    // 5. Swiss station departure bell (inharmonic brass partials)
+    // 5. Departure chime (2-tone Swiss bell in Alps, 4-note Hassha melody in Tokyo)
     private var bellHandled: UInt32 = 0
-    private var bellEnv1: Float = 0, bellEnv2: Float = 0
-    private var bellDelay = 0
-    private var bellP1a: Float = 0, bellP1b: Float = 0, bellP1c: Float = 0
-    private var bellP2a: Float = 0, bellP2b: Float = 0, bellP2c: Float = 0
+    private var melodyNotesLeft = 0
+    private var melodyTimer: Float = 0
+    private var melodyNoteIndex = 0
+    private var melodyIsTokyo = false
+    private var chimeEnv: Float = 0
+    private var chimeFreq: Float = 659.25
+    private var chimePa: Float = 0, chimePb: Float = 0, chimePc: Float = 0
 
-    // 6. Alpine environment: pine breeze, organic raindrops, rolling thunder, daytime songbirds, night crickets
-    private var breezeFilterL = SVF()
-    private var breezeFilterR = SVF()
+    // 6. Drive-through Train Wash (bubbly water spray + spinning brush swish)
+    private var washFilterL = SVF(), washFilterR = SVF()
+    private var washBrushLFO: Float = 0
+    private var bubbleEnv: Float = 0
+    private var bubbleFreq: Float = 650
+    private var bubblePhase: Float = 0
+
+    // 7. Environment: breeze, raindrops, thunder, songbirds, crickets
+    private var breezeFilterL = SVF(), breezeFilterR = SVF()
     private var breezeLFO: Float = 0
-    private var rainBedFilterL = SVF()
-    private var rainBedFilterR = SVF()
+    private var rainBedFilterL = SVF(), rainBedFilterR = SVF()
     private var dropEnvL: Float = 0, dropEnvR: Float = 0
     private var dropFreqL: Float = 1400, dropFreqR: Float = 1600
     private var dropPhaseL: Float = 0, dropPhaseR: Float = 0
@@ -124,24 +139,22 @@ final class TrainAudio {
     private var thunderCrackEnv: Float = 0
     private var thunderFilter = SVF()
 
-    // Daytime alpine songbird synthesizer (occasional cheerful stereo melodic chirps)
     private var birdTimer: Float = 1.8
     private var birdNotesLeft = 0
-    private var birdNoteEnv: Float = 0
     private var birdNoteTime: Float = 0
     private var birdNoteDur: Float = 0.14
     private var birdBaseFreq: Float = 2800
     private var birdSweep: Float = 600
     private var birdPhase: Float = 0
-    private var birdPan: Float = 0.5 // 0 = left, 1 = right
+    private var birdPan: Float = 0.5
 
-    // Nighttime alpine crickets (soft stereo rhythmic 4.1 kHz pulses)
     private var cricketPhase: Float = 0
     private var cricketChirpPhase: Float = 0
     private var cricketPulsePhase: Float = 0
 
     func update(speed: Float, power: Float, brake: Float, hornOn: Bool,
-                rain: Float, wind: Float, night: Float, viaduct: Float, tunnel: Float) {
+                rain: Float, wind: Float, night: Float, viaduct: Float,
+                tunnel: Float, wash: Float, trainKind: TrainKind, isUrban: Bool) {
         shared.withLock { state in
             state.speed = speed
             state.power = power
@@ -152,6 +165,9 @@ final class TrainAudio {
             state.night = night
             state.viaduct = viaduct
             state.tunnel = tunnel
+            state.wash = wash
+            state.trainKind = trainKind.rawValue
+            state.isUrban = isUrban
         }
     }
 
@@ -224,17 +240,13 @@ final class TrainAudio {
 
     @inline(__always)
     private func nextWhite() -> Float {
-        seed ^= seed << 13
-        seed ^= seed >> 17
-        seed ^= seed << 5
+        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5
         return Float(Int32(bitPattern: seed)) * (1.0 / 2_147_483_648.0)
     }
 
     @inline(__always)
     private func rand01() -> Float {
-        seed ^= seed << 13
-        seed ^= seed >> 17
-        seed ^= seed << 5
+        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5
         return Float(seed & 0x00FF_FFFF) * (1.0 / 16_777_216.0)
     }
 
@@ -243,12 +255,10 @@ final class TrainAudio {
         min(6.2831853 * hz / sampleRate, 0.82)
     }
 
-    /// Generates 4 warm harmonics using Chebyshev identities from a single sin/cos pair.
     @inline(__always)
     private func whistleVoice(_ phase: Float) -> Float {
         let a = 6.2831853 * phase
-        let s1 = sin(a)
-        let c1 = cos(a)
+        let s1 = sin(a), c1 = cos(a)
         let c2 = 2 * c1 * c1 - 1
         let s2 = 2 * s1 * c1
         let s3 = s1 * (4 * c1 * c1 - 1)
@@ -270,101 +280,131 @@ final class TrainAudio {
         sNight += (p.night - sNight) * 0.0001
         sViaduct += (p.viaduct - sViaduct) * 0.0003
         sTunnel += (p.tunnel - sTunnel) * 0.0003
+        sWash += (p.wash - sWash) * 0.0008
 
         var outL: Float = 0
         var outR: Float = 0
 
         // =====================================================================
-        // 1. STEAM LOCOMOTIVE: Punchy resonant exhaust chuffs + warm boiler simmer + idle air pump
+        // 1. TRAIN PROPULSION (Distinct per train type!)
         // =====================================================================
-        if sSpeed > 0.15 {
-            // 4 exhaust beats per wheel revolution (0.8m driving wheel radius -> circumference 5.03m).
-            let revRate = sSpeed / 5.03
-            let chuffRate = max(0.8, revRate * 4.0)
-            chuffPhase += chuffRate * dt
-            if chuffPhase >= 1 {
-                chuffPhase -= 1
-                chuffIndex = (chuffIndex + 1) & 3
-                let accent: Float = chuffIndex == 0 ? 1.0 : (chuffIndex == 2 ? 0.86 : 0.72)
-                chuffBodyEnv = accent
-                chuffPuffEnv = accent
-                if chuffIndex == 0 || chuffIndex == 2 {
-                    chuffClickEnv = 0.45
+        if p.trainKind == 0 {
+            // --- STEAM EXPRESS: Punchy rhythmic "CHUGGA-CHUGGA" cylinder boom + tight warm puff ---
+            if sSpeed > 0.12 {
+                let chuffRate = max(0.9, (sSpeed / 5.03) * 4.0)
+                chuffPhase += chuffRate * dt
+                if chuffPhase >= 1 {
+                    chuffPhase -= 1
+                    chuffIndex = (chuffIndex + 1) & 3
+                    let accent: Float = chuffIndex == 0 ? 1.0 : (chuffIndex == 2 ? 0.85 : 0.68)
+                    chuffBoomEnv = accent
+                    chuffPuffEnv = accent
+                    chuffRodEnv = (chuffIndex == 0 || chuffIndex == 2) ? 0.65 : 0.25
                 }
+
+                // Crisp beat separation: rapid decay keeps every chug distinct instead of blurring into noise.
+                let boomDecay = max(16.0, chuffRate * 7.5)
+                let puffDecay = max(13.0, chuffRate * 6.5)
+                chuffBoomEnv *= max(0, 1 - boomDecay * dt)
+                chuffPuffEnv *= max(0, 1 - puffDecay * dt)
+                chuffRodEnv *= max(0, 1 - 90 * dt)
+
+                // Pitched cylinder chest thump (sweeps 112 Hz -> 46 Hz on each exhaust beat!)
+                let boomHz: Float = 46 + chuffBoomEnv * (66 + sPower * 24)
+                chuffBoomPhase += boomHz * dt; if chuffBoomPhase >= 1 { chuffBoomPhase -= 1 }
+                let boom = tanh(sin(6.2831853 * chuffBoomPhase) * 1.45) * chuffBoomEnv * 0.34
+
+                // Tight low-mid steam chest exhalation (320-480 Hz resonant, strictly band-limited)
+                let puff = chuffPuffFilter.process(white, f: freqCoeff(320 + sPower * 160), q: 0.42).bp * chuffPuffEnv * 0.22
+
+                // Subtle iron connecting-rod clank
+                chuffRodPhase += 340 * dt; if chuffRodPhase >= 1 { chuffRodPhase -= 1 }
+                let rod = sin(6.2831853 * chuffRodPhase) * chuffRodEnv * 0.045
+
+                let effort = 0.20 + 0.80 * sPower
+                let speedBalance = 1.0 / (1.0 + sSpeed * 0.028)
+                let sig = (boom + puff + rod) * effort * speedBalance * (1 + sTunnel * 0.25)
+                outL += sig; outR += sig
+            } else {
+                chuffBoomEnv *= 0.99; chuffPuffEnv *= 0.99
             }
 
-            // Sharp separation at low speeds, blending gently into a rhythmic steam thrum at cruise speed.
-            let decayRate = max(9.5, chuffRate * 5.2)
-            chuffBodyEnv *= max(0, 1 - decayRate * dt)
-            chuffPuffEnv *= max(0, 1 - (decayRate * 0.72) * dt)
-            chuffClickEnv *= max(0, 1 - 120 * dt)
+            // Quiet warm boiler simmer + gentle idle Westinghouse air pump when stopped
+            let idleAmt = max(0, 1 - sSpeed / 3.5)
+            if idleAmt > 0.01 {
+                let simmer = simmerFilter.process(white, f: freqCoeff(165), q: 0.7).lp * 0.032 * idleAmt
+                airPumpTimer -= dt
+                if airPumpTimer <= 0 {
+                    airPumpTimer = 2.2 + rand01() * 0.9
+                    airPumpEnv = 1.0
+                }
+                var pump: Float = 0
+                if airPumpEnv > 0.001 {
+                    airPumpEnv *= max(0, 1 - 15 * dt)
+                    airPumpPhase += 135 * dt; if airPumpPhase >= 1 { airPumpPhase -= 1 }
+                    pump = sin(6.2831853 * airPumpPhase) * airPumpEnv * 0.028 * idleAmt
+                }
+                outL += simmer + pump; outR += simmer + pump
+            }
 
-            // Deep cylinder chest thump (~85-135 Hz pitched body + resonant low bandpass)
-            let bodyFreq: Float = 82 + min(sSpeed * 2.2, 42) + sPower * 22
-            chuffSubPhase += bodyFreq * dt
-            if chuffSubPhase >= 1 { chuffSubPhase -= 1 }
-            let subThump = sin(6.2831853 * chuffSubPhase) * chuffBodyEnv * chuffBodyEnv * 0.24
-            let bodyNoise = chuffBodyFilter.process(white, f: freqCoeff(165 + sPower * 80), q: 0.45).bp * chuffBodyEnv * 0.42
+        } else if p.trainKind == 1 {
+            // --- SHINKANSEN BULLET: Iconic rising-pitch Japanese VVVF electric inverter hum + sleek glide ---
+            if sSpeed > 0.1 {
+                let speedNorm = min(sSpeed / 56.0, 1.0)
+                // Musical VVVF traction inverter whine (prominent while accelerating or braking!)
+                let motorLoad = max(sPower, sBrake * 0.75) * (1 - smoothstep(0.45, 0.95, speedNorm) * 0.55)
+                let baseHz: Float = 115 + min(sSpeed * 11.5, 420)
+                vvvfP1 += baseHz * dt; if vvvfP1 >= 1 { vvvfP1 -= 1 }
+                vvvfP2 += (baseHz * 1.498) * dt; if vvvfP2 >= 1 { vvvfP2 -= 1 } // musical fifth harmonic
+                vvvfP3 += (baseHz * 2.0) * dt; if vvvfP3 >= 1 { vvvfP3 -= 1 }
+                let inverter = (sin(6.2831853 * vvvfP1) * 0.55
+                                + sin(6.2831853 * vvvfP2) * 0.25
+                                + sin(6.2831853 * vvvfP3) * 0.16) * motorLoad * 0.11
 
-            // Warm breathy steam puff (~420-680 Hz bandpass — NO harsh high-frequency static!)
-            let puff = chuffPuffFilter.process(white, f: freqCoeff(440 + sPower * 220), q: 0.55).bp * chuffPuffEnv * 0.20
+                // Smooth high-speed aerodynamic whoosh above 80 km/h
+                let aeroAmt = smoothstep(16, 54, sSpeed) * 0.065
+                let aL = aeroFilterL.process(whiteL, f: freqCoeff(220 + speedNorm * 260), q: 0.55).bp * aeroAmt
+                let aR = aeroFilterR.process(whiteR, f: freqCoeff(235 + speedNorm * 250), q: 0.55).bp * aeroAmt
+                outL += inverter + aL
+                outR += inverter + aR
+            }
 
-            // Subtle iron valve-gear click on main strokes
-            let rodClick = sin(6.2831853 * chuffSubPhase * 3.7) * chuffClickEnv * 0.035
-
-            // Reduce chuff volume smoothly when coasting at speed (like a real closed-regulator steam engine).
-            let effort = 0.14 + 0.86 * sPower
-            let speedTame = 1.0 / (1.0 + sSpeed * 0.035)
-            let locoSig = (subThump + bodyNoise + puff + rodClick) * effort * speedTame * (1 + sTunnel * 0.25)
-            outL += locoSig
-            outR += locoSig
         } else {
-            chuffBodyEnv *= 0.992
-            chuffPuffEnv *= 0.992
-        }
-
-        // Warm low-frequency boiler simmer & gentle Westinghouse air-pump pulse when idling at a station.
-        let idleAmt = max(0, 1 - sSpeed / 4.0)
-        if idleAmt > 0.01 {
-            let simmer = simmerFilter.process(white, f: freqCoeff(190), q: 0.7).lp * 0.045 * idleAmt
-            airPumpTimer -= dt
-            if airPumpTimer <= 0 {
-                airPumpTimer = 2.1 + rand01() * 0.9
-                airPumpEnv = 1.0
-            }
-            var pumpSig: Float = 0
-            if airPumpEnv > 0.001 {
-                airPumpEnv *= max(0, 1 - 14 * dt)
-                airPumpPhase += 145 * dt
-                if airPumpPhase >= 1 { airPumpPhase -= 1 }
-                pumpSig = sin(6.2831853 * airPumpPhase) * airPumpEnv * 0.032 * idleAmt
-            }
-            outL += simmer + pumpSig
-            outR += simmer + pumpSig
+            // --- CARGO FREIGHT: Deep rhythmic multi-cylinder diesel-electric prime mover thrum ---
+            let rpm: Float = 13.5 + sPower * 24.0 + min(sSpeed * 0.35, 8.0)
+            dieselCylPhase += rpm * dt; if dieselCylPhase >= 1 { dieselCylPhase -= 1 }
+            let pulse = 0.55 + 0.45 * sin(6.2831853 * dieselCylPhase)
+            let toneHz: Float = 44 + sPower * 42 + min(sSpeed * 0.8, 16)
+            dieselTonePhase += toneHz * dt; if dieselTonePhase >= 1 { dieselTonePhase -= 1 }
+            let dieselOsc = sin(6.2831853 * dieselTonePhase) * 0.60
+                + sin(12.5663706 * dieselTonePhase) * 0.32
+                + sin(18.8495559 * dieselTonePhase) * 0.18
+            let grit = dieselFilter.process(white, f: freqCoeff(110 + sPower * 90), q: 0.5).bp * 0.18
+            let load = 0.28 + 0.72 * sPower
+            let sig = (tanh(dieselOsc * 1.3) * 0.18 + grit) * pulse * load
+            outL += sig; outR += sig
         }
 
         // =====================================================================
-        // 2. STEEL RAILS: Warm low rolling hum + paired metallic bogie "da-dum, da-dum"
+        // 2. STEEL RAILS: Deep rolling hum + metallic 4-hit bogie "da-dum, da-dum"
         // =====================================================================
         if sSpeed > 0.1 {
-            let speedNorm = min(sSpeed / 20.0, 1.0)
-            // Deep, warm rail bed resonance (65-115 Hz low-pass — zero fizz)
-            let rollCut: Float = 72 + speedNorm * 45 + sViaduct * 55 + sTunnel * 35
+            let speedNorm = min(sSpeed / 24.0, 1.0)
+            let rollCut: Float = 68 + speedNorm * 45 + sViaduct * 55 + sTunnel * 35
             let rL = rollFilterL.process(whiteL, f: freqCoeff(rollCut), q: 0.65).lp
             let rR = rollFilterR.process(whiteR, f: freqCoeff(rollCut), q: 0.65).lp
-            let rollGain = speedNorm * (0.28 + sViaduct * 0.22 + sTunnel * 0.36)
+            let bulletQuiet: Float = p.trainKind == 1 ? 0.68 : 1.0
+            let rollGain = speedNorm * bulletQuiet * (0.24 + sViaduct * 0.22 + sTunnel * 0.36)
             outL += rL * rollGain
             outR += rR * rollGain
 
-            // Hollow tunnel cavern air resonance (~140 Hz)
             if sTunnel > 0.02 {
                 let cav = tunnelResFilter.process(white, f: freqCoeff(138), q: 0.22).bp * sTunnel * speedNorm * 0.18
-                outL += cav
-                outR += cav
+                outL += cav; outR += cav
             }
 
-            // Paired bogie rail-joint rhythm: two axles close together, then next bogie!
-            jointPhase += sSpeed * dt / 18.0
+            let railLength: Float = p.trainKind == 1 ? 24.0 : 18.0
+            jointPhase += sSpeed * dt / railLength
             if jointPhase >= 1 {
                 jointPhase -= 1
                 bogieStep = 1
@@ -376,91 +416,89 @@ final class TrainAudio {
                 bogieTimer -= 1
                 if bogieTimer == 0 {
                     if bogieStep == 1 {
-                        // Second axle of first bogie
-                        clackEnv = 0.85
-                        bogieStep = 2
+                        clackEnv = 0.85; bogieStep = 2
                         bogieTimer = Int(4.4 / max(sSpeed, 1.0) * sampleRate)
                     } else if bogieStep == 2 {
-                        // First axle of trailing bogie
-                        clackEnv = 0.78
-                        clackPan = -clackPan
-                        bogieStep = 3
+                        clackEnv = 0.76; clackPan = -clackPan; bogieStep = 3
                         bogieTimer = Int(1.8 / max(sSpeed, 1.0) * sampleRate)
                     } else if bogieStep == 3 {
-                        // Second axle of trailing bogie
-                        clackEnv = 0.68
-                        bogieStep = 0
+                        clackEnv = 0.66; bogieStep = 0
                     }
                 }
             }
             if clackEnv > 0.0005 {
-                clackEnv *= max(0, 1 - 68 * dt)
+                clackEnv *= max(0, 1 - 72 * dt)
                 let bridgePitch: Float = 1.0 + sViaduct * 0.18
-                clackP1 += 185 * bridgePitch * dt; if clackP1 >= 1 { clackP1 -= 1 }
-                clackP2 += 420 * bridgePitch * dt; if clackP2 >= 1 { clackP2 -= 1 }
+                clackP1 += 188 * bridgePitch * dt; if clackP1 >= 1 { clackP1 -= 1 }
+                clackP2 += 425 * bridgePitch * dt; if clackP2 >= 1 { clackP2 -= 1 }
                 clackP3 += 890 * bridgePitch * dt; if clackP3 >= 1 { clackP3 -= 1 }
                 let steelRing = sin(6.2831853 * clackP1) * 0.55
                     + sin(6.2831853 * clackP2) * 0.30
                     + sin(6.2831853 * clackP3) * 0.15
-                let thud = clackPingFilter.process(white, f: freqCoeff(260), q: 0.45).bp * 0.45
-                let clack = (steelRing + thud) * clackEnv * 0.17 * min(sSpeed / 3.5, 1) * (1 + sViaduct * 0.35 + sTunnel * 0.3)
+                let thud = clackPingFilter.process(white, f: freqCoeff(250), q: 0.45).bp * 0.38
+                let clack = (steelRing + thud) * clackEnv * 0.17 * bulletQuiet * min(sSpeed / 3.5, 1) * (1 + sViaduct * 0.35 + sTunnel * 0.3)
                 outL += clack * (clackPan > 0 ? 1.15 : 0.85)
                 outR += clack * (clackPan > 0 ? 0.85 : 1.15)
             }
         }
 
         // =====================================================================
-        // 3. AIR BRAKES: Metallic brake-shoe resonance + pneumatic stop sigh
+        // 3. AIR BRAKES & PNEUMATIC STOP RELEASE
         // =====================================================================
         if sBrake > 0.08 && sSpeed > 0.4 {
             wasBrakingMoving = true
             let brakeAmt = sBrake * min(sSpeed / 5.0, 1.0)
-            // Narrow resonant metallic brake-shoe hum (warm, musical, never screechy static)
-            let squealWindow = smoothstep(0.4, 5.5, sSpeed) * (1 - smoothstep(9.0, 18.0, sSpeed))
-            brakeP1 += (1180 - sSpeed * 10) * dt; if brakeP1 >= 1 { brakeP1 -= 1 }
-            brakeP2 += (1775 - sSpeed * 14) * dt; if brakeP2 >= 1 { brakeP2 -= 1 }
+            let squealWindow = smoothstep(0.4, 5.5, sSpeed) * (1 - smoothstep(10.0, 20.0, sSpeed))
+            brakeP1 += (1180 - sSpeed * 9) * dt; if brakeP1 >= 1 { brakeP1 -= 1 }
+            brakeP2 += (1775 - sSpeed * 12) * dt; if brakeP2 >= 1 { brakeP2 -= 1 }
             let shoe = (sin(6.2831853 * brakeP1) * 0.65 + sin(6.2831853 * brakeP2) * 0.35) * 0.022 * squealWindow
-            let air = brakeAirFilter.process(white, f: freqCoeff(750), q: 0.45).bp * 0.032
+            let air = brakeAirFilter.process(white, f: freqCoeff(720), q: 0.45).bp * 0.028
             let sig = (shoe + air) * brakeAmt
-            outL += sig
-            outR += sig
+            outL += sig; outR += sig
         } else if wasBrakingMoving && sSpeed < 0.25 {
             wasBrakingMoving = false
             airReleaseEnv = 1.0
         }
         if airReleaseEnv > 0.001 {
-            airReleaseEnv *= max(0, 1 - 4.2 * dt)
-            let sweepHz = 450 + airReleaseEnv * 900
-            let puff = airReleaseFilter.process(white, f: freqCoeff(sweepHz), q: 0.55).bp * airReleaseEnv * 0.075
-            outL += puff
-            outR += puff
+            airReleaseEnv *= max(0, 1 - 4.4 * dt)
+            let puff = airReleaseFilter.process(white, f: freqCoeff(420 + airReleaseEnv * 850), q: 0.55).bp * airReleaseEnv * 0.07
+            outL += puff; outR += puff
         }
 
         // =====================================================================
-        // 4. THREE-CHIME BRASS STEAM WHISTLE + STEREO ALPINE VALLEY / TUNNEL ECHO
+        // 4. TRAIN-SPECIFIC HORN + STEREO VALLEY / TUNNEL ECHO
         // =====================================================================
         let hornTarget: Float = p.hornOn ? 1 : 0
-        hornEnv += (hornTarget - hornEnv) * (hornTarget > hornEnv ? 0.0024 : 0.0005)
-        hornPitchEnv += (hornTarget - hornPitchEnv) * (hornTarget > hornPitchEnv ? 0.0009 : 0.00035)
+        hornEnv += (hornTarget - hornEnv) * (hornTarget > hornEnv ? 0.0028 : 0.00055)
+        hornPitchEnv += (hornTarget - hornPitchEnv) * (hornTarget > hornPitchEnv ? 0.0010 : 0.0004)
         var dryHorn: Float = 0
         if hornEnv > 0.0005 {
-            hornVib += 5.1 * dt
-            if hornVib >= 1 { hornVib -= 1 }
-            // Authentic steam chamber pitch scoop up on attack + gentle breath vibrato
-            let scoop: Float = 0.972 + 0.028 * hornPitchEnv
-            let pitchMod: Float = scoop * (1.0 + 0.0022 * sin(6.2831853 * hornVib))
-            hornP0 += 311.13 * pitchMod * dt; if hornP0 >= 1 { hornP0 -= 1 } // Eb4
-            hornP1 += 369.99 * pitchMod * dt; if hornP1 >= 1 { hornP1 -= 1 } // Gb4
-            hornP2 += 466.16 * pitchMod * dt; if hornP2 >= 1 { hornP2 -= 1 } // Bb4
-            let rawChord = whistleVoice(hornP0) + whistleVoice(hornP1) * 0.92 + whistleVoice(hornP2) * 0.82
-            let warmChord = hornWarmFilter.process(tanh(rawChord * 0.48), f: freqCoeff(1450), q: 0.85).lp
-            let breath = hornChiffFilter.process(white, f: freqCoeff(1150), q: 0.35).bp * 0.055
+            hornVib += 5.0 * dt; if hornVib >= 1 { hornVib -= 1 }
+            let scoop: Float = p.trainKind == 1 ? 1.0 : (0.974 + 0.026 * hornPitchEnv)
+            let pitchMod: Float = scoop * (1.0 + (p.trainKind == 1 ? 0.0008 : 0.0022) * sin(6.2831853 * hornVib))
+
+            let f0: Float, f1: Float, f2: Float
+            if p.trainKind == 1 {
+                // Sleek bright Japanese Shinkansen dual-tone electric chime (A4 + C#5 + A5)
+                f0 = 440.0; f1 = 554.37; f2 = 880.0
+            } else if p.trainKind == 2 {
+                // Deep powerful freight diesel 3-chime air horn (Bb3 + D4 + F4)
+                f0 = 233.08; f1 = 293.66; f2 = 349.23
+            } else {
+                // Classic warm Alpine brass steam whistle (Eb4 + Gb4 + Bb4)
+                f0 = 311.13; f1 = 369.99; f2 = 466.16
+            }
+            hornP0 += f0 * pitchMod * dt; if hornP0 >= 1 { hornP0 -= 1 }
+            hornP1 += f1 * pitchMod * dt; if hornP1 >= 1 { hornP1 -= 1 }
+            hornP2 += f2 * pitchMod * dt; if hornP2 >= 1 { hornP2 -= 1 }
+            let rawChord = whistleVoice(hornP0) + whistleVoice(hornP1) * 0.92 + whistleVoice(hornP2) * (p.trainKind == 1 ? 0.35 : 0.80)
+            let cut: Float = p.trainKind == 1 ? 2100 : 1400
+            let warmChord = hornWarmFilter.process(tanh(rawChord * 0.48), f: freqCoeff(cut), q: 0.85).lp
+            let breath = p.trainKind == 0 ? hornChiffFilter.process(white, f: freqCoeff(1100), q: 0.35).bp * 0.05 : 0
             dryHorn = (warmChord + breath) * hornEnv * 0.34
-            outL += dryHorn
-            outR += dryHorn
+            outL += dryHorn; outR += dryHorn
         }
 
-        // Warmly low-passed stereo alpine valley / tunnel echo line
         let delayL = min(Int(sampleRate * (0.36 - sTunnel * 0.18)), echoMask - 1)
         let delayR = min(Int(sampleRate * (0.52 - sTunnel * 0.24)), echoMask - 1)
         let tapL = echoBuf[(echoWrite - delayL) & echoMask]
@@ -470,85 +508,97 @@ final class TrainAudio {
         echoBuf[echoWrite] = dryHorn + echoLP * echoFeedback
         echoWrite = (echoWrite + 1) & echoMask
         let echoWet: Float = 0.24 + sTunnel * 0.28
-        outL += tapL * echoWet
-        outR += tapR * echoWet
+        outL += tapL * echoWet; outR += tapR * echoWet
 
         // =====================================================================
-        // 5. SWISS STATION DEPARTURE BELL (warm brass inharmonic partials)
+        // 5. STATION DEPARTURE CHIME (Swiss Brass Bell / Tokyo Hassha Melody!)
         // =====================================================================
         if p.bellRequests != bellHandled {
             bellHandled = p.bellRequests
-            bellEnv1 = 1.0
-            bellDelay = Int(sampleRate * 0.28)
+            melodyIsTokyo = p.isUrban
+            melodyNoteIndex = 0
+            melodyNotesLeft = p.isUrban ? 4 : 2
+            melodyTimer = 0
         }
-        if bellDelay > 0 {
-            bellDelay -= 1
-            if bellDelay == 0 { bellEnv2 = 0.92 }
+        if melodyNotesLeft > 0 {
+            melodyTimer -= dt
+            if melodyTimer <= 0 {
+                if melodyIsTokyo {
+                    // Cheerful 4-note Tokyo station Hassha melody (C5 -> E5 -> G5 -> C6)
+                    let notes: [Float] = [523.25, 659.25, 783.99, 1046.50]
+                    chimeFreq = notes[melodyNoteIndex % notes.count]
+                    melodyTimer = 0.19
+                } else {
+                    // Warm 2-tone Swiss railway station bell (E5 -> C#5)
+                    chimeFreq = melodyNoteIndex == 0 ? 659.25 : 554.37
+                    melodyTimer = 0.29
+                }
+                chimeEnv = 1.0
+                melodyNoteIndex += 1
+                melodyNotesLeft -= 1
+            }
         }
-        if bellEnv1 > 0.0005 || bellEnv2 > 0.0005 {
-            var b: Float = 0
-            if bellEnv1 > 0.0005 {
-                bellP1a += 659.25 * dt; if bellP1a >= 1 { bellP1a -= 1 }
-                bellP1b += 1318.5 * dt; if bellP1b >= 1 { bellP1b -= 1 }
-                bellP1c += 1819.5 * dt; if bellP1c >= 1 { bellP1c -= 1 }
-                let tone = sin(6.2831853 * bellP1a) * 0.65
-                    + sin(6.2831853 * bellP1b) * 0.25 * bellEnv1
-                    + sin(6.2831853 * bellP1c) * 0.14 * bellEnv1 * bellEnv1
-                b += tone * bellEnv1
-                bellEnv1 *= max(0, 1 - 2.1 * dt)
-            }
-            if bellEnv2 > 0.0005 {
-                bellP2a += 554.37 * dt; if bellP2a >= 1 { bellP2a -= 1 }
-                bellP2b += 1108.7 * dt; if bellP2b >= 1 { bellP2b -= 1 }
-                bellP2c += 1530.0 * dt; if bellP2c >= 1 { bellP2c -= 1 }
-                let tone = sin(6.2831853 * bellP2a) * 0.65
-                    + sin(6.2831853 * bellP2b) * 0.25 * bellEnv2
-                    + sin(6.2831853 * bellP2c) * 0.14 * bellEnv2 * bellEnv2
-                b += tone * bellEnv2
-                bellEnv2 *= max(0, 1 - 1.65 * dt)
-            }
-            outL += b * 0.14
-            outR += b * 0.16
+        if chimeEnv > 0.0005 {
+            chimePa += chimeFreq * dt; if chimePa >= 1 { chimePa -= 1 }
+            chimePb += chimeFreq * 2.0 * dt; if chimePb >= 1 { chimePb -= 1 }
+            chimePc += chimeFreq * 2.76 * dt; if chimePc >= 1 { chimePc -= 1 }
+            let bell = (sin(6.2831853 * chimePa) * 0.65
+                        + sin(6.2831853 * chimePb) * 0.24 * chimeEnv
+                        + sin(6.2831853 * chimePc) * 0.12 * chimeEnv * chimeEnv) * chimeEnv
+            chimeEnv *= max(0, 1 - (melodyIsTokyo ? 3.2 : 1.9) * dt)
+            outL += bell * 0.14
+            outR += bell * 0.16
         }
 
         // =====================================================================
-        // 6. ALPINE ENVIRONMENT: Musical pine breeze, organic raindrops, songbirds, crickets, thunder
+        // 6. DRIVE-THROUGH TRAIN WASH (bubbly water spray + spinning brushes!)
+        // =====================================================================
+        if sWash > 0.01 {
+            washBrushLFO += 3.2 * dt; if washBrushLFO >= 1 { washBrushLFO -= 1 }
+            let swish = 0.65 + 0.35 * sin(6.2831853 * washBrushLFO)
+            let sprayL = washFilterL.process(whiteL, f: freqCoeff(850 + swish * 420), q: 0.45).bp
+            let sprayR = washFilterR.process(whiteR, f: freqCoeff(920 + (1 - swish) * 400), q: 0.45).bp
+            outL += sprayL * sWash * swish * 0.14
+            outR += sprayR * sWash * swish * 0.14
+
+            // Cheerful soapy bubble pops!
+            if bubbleEnv < 0.05 && rand01() < sWash * 24.0 * dt {
+                bubbleEnv = 0.7 + rand01() * 0.3
+                bubbleFreq = 480 + rand01() * 520
+            }
+            if bubbleEnv > 0.005 {
+                bubbleEnv *= max(0, 1 - 36 * dt)
+                bubbleFreq += 1400 * dt // upward bubble pop chirp!
+                bubblePhase += bubbleFreq * dt; if bubblePhase >= 1 { bubblePhase -= 1 }
+                let pop = sin(6.2831853 * bubblePhase) * bubbleEnv * 0.045 * sWash
+                outL += pop; outR += pop
+            }
+        }
+
+        // =====================================================================
+        // 7. LIVING ENVIRONMENT (Breeze, Raindrops, Birds, Crickets, Thunder)
         // =====================================================================
         let exterior = 1 - sTunnel * 0.82
 
-        // Soft sweeping pine-forest breeze (narrow resonant bandpass, zero harsh static)
-        breezeLFO += 0.09 * dt
-        if breezeLFO >= 1 { breezeLFO -= 1 }
+        breezeLFO += 0.09 * dt; if breezeLFO >= 1 { breezeLFO -= 1 }
         let gust = 0.5 + 0.5 * sin(6.2831853 * breezeLFO)
         if sWind > 0.08 {
             let breezeAmt = max(0, sWind - 0.06) * exterior
-            let bFreqL = 240 + gust * 190
-            let bFreqR = 265 + (1 - gust) * 175
-            let bL = breezeFilterL.process(whiteL, f: freqCoeff(bFreqL), q: 0.35).bp
-            let bR = breezeFilterR.process(whiteR, f: freqCoeff(bFreqR), q: 0.35).bp
-            let gain = breezeAmt * (0.045 + 0.035 * gust)
-            outL += bL * gain
-            outR += bR * gain
+            let bL = breezeFilterL.process(whiteL, f: freqCoeff(240 + gust * 190), q: 0.35).bp
+            let bR = breezeFilterR.process(whiteR, f: freqCoeff(265 + (1 - gust) * 175), q: 0.35).bp
+            let gain = breezeAmt * (0.042 + 0.032 * gust)
+            outL += bL * gain; outR += bR * gain
         }
 
-        // Organic rain: warm muffled backdrop + distinct stereo roof raindrop patters
         if sRain > 0.02 {
             let rAmt = min(sRain, 1.6) * exterior
             let bedL = rainBedFilterL.process(whiteL, f: freqCoeff(680), q: 0.85).bp
             let bedR = rainBedFilterR.process(whiteR, f: freqCoeff(740), q: 0.85).bp
-            outL += bedL * rAmt * 0.038
-            outR += bedR * rAmt * 0.038
+            outL += bedL * rAmt * 0.036; outR += bedR * rAmt * 0.036
 
-            // Random micro raindrop plinks on coach roof & windows
             let dropProb = rAmt * 18.0 * dt
-            if dropEnvL < 0.05 && rand01() < dropProb {
-                dropEnvL = 0.5 + rand01() * 0.5
-                dropFreqL = 950 + rand01() * 1100
-            }
-            if dropEnvR < 0.05 && rand01() < dropProb {
-                dropEnvR = 0.5 + rand01() * 0.5
-                dropFreqR = 950 + rand01() * 1100
-            }
+            if dropEnvL < 0.05 && rand01() < dropProb { dropEnvL = 0.5 + rand01() * 0.5; dropFreqL = 950 + rand01() * 1100 }
+            if dropEnvR < 0.05 && rand01() < dropProb { dropEnvR = 0.5 + rand01() * 0.5; dropFreqR = 950 + rand01() * 1100 }
             if dropEnvL > 0.002 {
                 dropEnvL *= max(0, 1 - 85 * dt)
                 dropPhaseL += dropFreqL * dt; if dropPhaseL >= 1 { dropPhaseL -= 1 }
@@ -561,8 +611,8 @@ final class TrainAudio {
             }
         }
 
-        // Daytime alpine songbirds (cheerful distant stereo chirps in calm weather outside the tunnel)
-        let calmDay = max(0, 1 - sNight * 1.4) * max(0, 1 - sRain * 2.0) * exterior
+        // Daytime songbirds (stronger in Swiss Alps, softer in Tokyo parks)
+        let calmDay = max(0, 1 - sNight * 1.4) * max(0, 1 - sRain * 2.0) * exterior * (p.isUrban ? 0.45 : 1.0)
         if calmDay > 0.1 {
             if birdNotesLeft == 0 {
                 birdTimer -= dt
@@ -571,7 +621,6 @@ final class TrainAudio {
                     birdNotesLeft = 2 + Int(rand01() * 2.9)
                     birdBaseFreq = 2250 + rand01() * 1250
                     birdPan = 0.15 + rand01() * 0.70
-                    birdNoteEnv = 1.0
                     birdNoteTime = 0
                     birdNoteDur = 0.09 + rand01() * 0.08
                     birdSweep = (rand01() > 0.45 ? 1 : -1) * (350 + rand01() * 650)
@@ -583,7 +632,7 @@ final class TrainAudio {
                     let env = sin(Float.pi * u) * sin(Float.pi * u)
                     let freq = birdBaseFreq + birdSweep * sin(Float.pi * u * 0.85)
                     birdPhase += freq * dt; if birdPhase >= 1 { birdPhase -= 1 }
-                    let chirp = sin(6.2831853 * birdPhase) * env * 0.026 * calmDay
+                    let chirp = sin(6.2831853 * birdPhase) * env * 0.025 * calmDay
                     outL += chirp * (1.0 - birdPan) * 1.3
                     outR += chirp * birdPan * 1.3
                 } else if birdNoteTime >= birdNoteDur + 0.065 {
@@ -595,8 +644,8 @@ final class TrainAudio {
             }
         }
 
-        // Nighttime alpine crickets (soft, peaceful stereo evening chorus)
-        let calmNight = smoothstep(0.35, 0.8, sNight) * max(0, 1 - sRain * 2.0) * exterior
+        // Nighttime alpine crickets (Alps only)
+        let calmNight = smoothstep(0.35, 0.8, sNight) * max(0, 1 - sRain * 2.0) * exterior * (p.isUrban ? 0 : 1)
         if calmNight > 0.02 {
             cricketChirpPhase += 1.45 * dt; if cricketChirpPhase >= 1 { cricketChirpPhase -= 1 }
             cricketPulsePhase += 28.0 * dt; if cricketPulsePhase >= 1 { cricketPulsePhase -= 1 }
@@ -604,11 +653,10 @@ final class TrainAudio {
             let pulse = max(0, sin(6.2831853 * cricketPulsePhase))
             cricketPhase += 4150 * dt; if cricketPhase >= 1 { cricketPhase -= 1 }
             let cSig = sin(6.2831853 * cricketPhase) * burst * pulse * 0.011 * calmNight
-            outL += cSig * 1.15
-            outR += cSig * 0.85
+            outL += cSig * 1.15; outR += cSig * 0.85
         }
 
-        // Deep rolling alpine thunder (initial crack + resonant sub-bass 55 Hz roll)
+        // Deep rolling thunder
         if p.thunderRequests != thunderHandled {
             thunderHandled = p.thunderRequests
             thunderEnv = 1.0
@@ -618,8 +666,7 @@ final class TrainAudio {
             let rumble = thunderFilter.process(white, f: freqCoeff(62), q: 0.55).lp * thunderEnv * 0.52
             let crack = thunderCrackEnv > 0.005 ? (white * thunderCrackEnv * 0.08) : 0
             let tSig = (rumble + crack) * (1 - sTunnel * 0.5)
-            outL += tSig
-            outR += tSig * 0.94
+            outL += tSig; outR += tSig * 0.94
             thunderEnv *= max(0, 1 - dt / 1.9)
             thunderCrackEnv *= max(0, 1 - 14 * dt)
         }

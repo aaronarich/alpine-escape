@@ -8,11 +8,19 @@ Every mountain, chalet, stone viaduct arch, snowflake, and steam whistle echo is
 
 ## Highlights
 
-- **100% Procedural Alpine World**: A ~4.2 km closed mountain loop connecting **Grindelwald**, **Kandersteg**, and **Andermatt**, complete with snow-capped peaks, a turquoise lake with drifting sailboats, varied spruce/larch/snow-dusted forests, grounded boulders, and clustered Swiss chalet villages.
-- **Iconic Landmarks**: Glide over a curved 12-arch Landwasser-style **stone viaduct** spanning a carved river gorge and race through a horseshoe **alpine mountain tunnel** lined with warm wall sconces.
-- **Dynamic Day/Night & Live Weather**: Smoothly cycle from morning through golden hour to starry alpine night (automatically or on demand) with sun/moon discs, 380 stars, drifting low-poly clouds, glowing village & coach windows, warm station lanterns, a locomotive spotlight beam, and live real-world weather via Open-Meteo (`Clear`, `Cloudy`, `Fog`, `Rain`, `Snow`, `Thunderstorm`).
-- **Expressive Steam Locomotive & Stations**: Quartered animated coupling rods synced to wheelsets, power-reactive chimney smoke, whistle steam plumes, startup cylinder steam, alpine grade physics, subtle curve banking, platform canopies, wooden water towers, boarding passengers, and animated red/green mechanical semaphore signals.
-- **Real-Time Procedural Stereo Audio**: Synthesized steam chuffs, stereo rail clickety-clack, alpine valley & tunnel whistle echo, hollow viaduct resonance, enclosed tunnel roar, air-brake hiss, two-tone Swiss station departure bells, rain, wind, and thunder.
+- **Two 100% Procedural Worlds**:
+  - **Swiss Alps**: A ~4.2 km mountain loop connecting **Grindelwald**, **Kandersteg**, and **Andermatt** with snow-capped peaks, a turquoise lake with sailboats, a 12-arch Landwasser-style stone viaduct, an alpine mountain tunnel, Swiss chalet villages, and spruce/larch forests.
+  - **Tokyo**: Express tracks connecting **Shibuya**, **Shinjuku**, and **Tokyo Station** with colorful low-poly skyscrapers, glowing night office windows & neon rooftop signs, **Tokyo Tower** on a central bay park island, pink **sakura** cherry blossom trees, a neon-lit urban tunnel, and Mount Fuji on the horizon.
+- **Three Switchable Train Types**:
+  - **Steam Express**: Classic green-and-brass steam locomotive with animated quartered coupling rods, tender, and three red coaches (~97 km/h).
+  - **Shinkansen Bullet**: Streamlined pearl-white & cobalt-blue bullet train with roof pantographs and sleek LED lighting (~202 km/h).
+  - **Cargo Freight**: Industrial yellow-and-navy diesel-electric locomotive pulling loadable flatcars with shipping containers, stacked timber logs, and crates.
+- **Cargo Missions, Train Wash & Celebration Confetti**:
+  - Pick up and deliver named cargo runs (*Alpine Timber*, *Swiss Cheese*, *Electronics*, *Ramen Crates*, etc.) with containers visibly loading/unloading on your flatcars.
+  - Roll through the **Drive-Through Train Wash** with spinning blue-and-white bristle rollers, soapy water spray, and bubbly wash audio.
+  - **Confetti bursts** across the screen whenever you deliver passengers or cargo, nail a Perfect Stop, or emerge sparkling clean from the Train Wash!
+- **Dynamic Day/Night & Live Weather**: Automatic or manual `Morning`, `Midday`, `Golden Hour`, and `Alpine Night` lighting with sun/moon discs, 380 stars, drifting clouds, glowing coach/city/chalet windows, headlight spotlight beam, and live Open-Meteo weather.
+- **Real-Time Procedural Stereo Audio**: Distinct resonant engines (punchy Steam *chugga-chugga*, rising Japanese Shinkansen VVVF electric inverter hum, deep Freight diesel-electric thrum), train-specific horns with stereo valley/tunnel echo, 4-hit metallic bogie clickety-clack, Swiss station bell & Tokyo Hassha departure melody, Train Wash spray & bubbles, daytime songbirds, night crickets, raindrops, and rolling thunder.
 - **Built for 60 fps on Apple TV 4K & Mac**: 6×6 spatially chunked terrain/scenery and 16-chunk track meshes for aggressive frustum & shadow culling, compact 36-byte interleaved indexless vertex buffers, batched wheel axles, shared low-poly passenger geometries, and lock-free audio parameter snapshots.
 
 ## Gallery
@@ -35,7 +43,7 @@ Every mountain, chalet, stone viaduct arch, snowflake, and steam whistle echo is
 | **Center (Select)** | Train Horn *(tap for quick toot, hold for sustained whistle)* |
 | **D-Pad ◀** | Cycle Camera (`Chase`, `Cab`, `Side`, `Trackside`, `Aerial`) |
 | **D-Pad ▶** | Cycle Weather (`Live`, `Clear`, `Cloudy`, `Fog`, `Rain`, `Snow`, `Storm`) |
-| **Play / Pause** | Cycle Time of Day (`Auto`, `Morning`, `Midday`, `Golden Hour`, `Alpine Night`) |
+| **Play / Pause** | Open / Close **Express Menu** *(switch Landscape, Train, Time of Day, Weather with D-Pad)* |
 
 ### macOS Keyboard
 
@@ -45,7 +53,10 @@ Every mountain, chalet, stone viaduct arch, snowflake, and steam whistle echo is
 | **Space** | Train Horn |
 | **C** | Cycle Camera |
 | **← / →** | Previous / Next Weather |
+| **L** | Switch Landscape (`Swiss Alps` ↔ `Tokyo`) |
+| **1 / 2 / 3** | Switch Train (`Steam Express` / `Shinkansen Bullet` / `Cargo Freight`) |
 | **T** | Cycle Time of Day |
+| **M** or **Tab** | Open / Close **Express Menu** |
 | **H** | Toggle HUD Controls Hint |
 
 ### Game Controller (Xbox / PlayStation)

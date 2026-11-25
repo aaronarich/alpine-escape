@@ -8,7 +8,11 @@ struct InputCommands {
     var weatherNext = false
     var weatherPrevious = false
     var nextTimeOfDay = false
+    var toggleMenu = false
+    var selectTap = false
     var toggleHints = false
+    var switchWorld = false
+    var switchTrain: TrainKind?
     var horn = false
 }
 
@@ -61,10 +65,13 @@ final class InputController {
     private var weatherPrev = Repeater()
     private var weatherNext = Repeater()
     private var timeOfDay = Repeater()
+    private var menu = Repeater()
+    private var selectEdge = Repeater()
     private var hints = Repeater()
+    private var worldKey = Repeater()
+    private var train1 = Repeater(), train2 = Repeater(), train3 = Repeater()
     private var hornPulseTimer: Float = 0
 
-    // Thread-safe bridge for main-thread UIPress events (Apple TV remote clickpad, IR/CEC remotes, Simulator).
     private struct PressState {
         var heldMask: UInt32 = 0
         var tapMask: UInt32 = 0
@@ -88,16 +95,21 @@ final class InputController {
         }
     }
 
-    func poll(dt: Float) -> InputCommands {
+    func poll(dt: Float, menuOpen: Bool = false) -> InputCommands {
         var wantUp = false
         var wantDown = false
+        var wantLeft = false
+        var wantRight = false
         var wantCamera = false
         var wantWeatherPrev = false
         var wantWeatherNext = false
         var wantTime = false
+        var wantMenu = false
         var wantHints = false
-        var wantHorn = false
-        var hornTapped = false
+        var wantWorld = false
+        var wantT1 = false, wantT2 = false, wantT3 = false
+        var wantSelect = false
+        var selectTapped = false
 
         // 1. UIKit UIPress state (tvOS Siri Remote clickpad ring, Click-Only mode, IR/CEC & iPhone TV Remote).
         let (held, taps): (UInt32, UInt32) = pressState.withLock { state in
@@ -110,11 +122,11 @@ final class InputController {
         if combined != 0 {
             if (combined & RemoteButton.up.rawValue) != 0        { wantUp = true }
             if (combined & RemoteButton.down.rawValue) != 0      { wantDown = true }
-            if (combined & RemoteButton.left.rawValue) != 0      { wantCamera = true }
-            if (combined & RemoteButton.right.rawValue) != 0     { wantWeatherNext = true }
-            if (combined & RemoteButton.playPause.rawValue) != 0 { wantTime = true }
-            if (held & RemoteButton.select.rawValue) != 0        { wantHorn = true }
-            if (taps & RemoteButton.select.rawValue) != 0        { hornTapped = true }
+            if (combined & RemoteButton.left.rawValue) != 0      { wantLeft = true }
+            if (combined & RemoteButton.right.rawValue) != 0     { wantRight = true }
+            if (combined & RemoteButton.playPause.rawValue) != 0 { wantMenu = true }
+            if (held & RemoteButton.select.rawValue) != 0        { wantSelect = true }
+            if (taps & RemoteButton.select.rawValue) != 0        { selectTapped = true }
         }
 
         // 2. GameController framework (Extended gamepads & Siri Remote directional/micro gamepads).
@@ -126,25 +138,24 @@ final class InputController {
                 let x = pad.dpad.xAxis.value
                 wantUp = wantUp || y > 0.5
                 wantDown = wantDown || y < -0.5
-                wantCamera = wantCamera || x < -0.5 || pad.buttonX.isPressed
-                wantWeatherNext = wantWeatherNext || x > 0.5 || pad.rightShoulder.isPressed
+                wantLeft = wantLeft || x < -0.5
+                wantRight = wantRight || x > 0.5
+                wantCamera = wantCamera || pad.buttonX.isPressed
+                wantWeatherNext = wantWeatherNext || pad.rightShoulder.isPressed
                 wantWeatherPrev = wantWeatherPrev || pad.leftShoulder.isPressed
                 wantTime = wantTime || pad.buttonY.isPressed
-                wantHorn = wantHorn || pad.buttonA.isPressed
+                wantMenu = wantMenu || pad.buttonMenu.isPressed
+                wantSelect = wantSelect || pad.buttonA.isPressed
             } else if let remote = controller.microGamepad {
-                // 2nd/3rd gen Siri Remote exposes a dedicated digital cardinal D-pad ring and center button.
-                // Using those directly fixes swipe-only behaviour and avoids outer-ring clicks triggering buttonA.
                 if let cardinal = remote.dpads[GCInputDirectionalCardinalDpad] {
                     wantUp = wantUp || cardinal.up.isPressed
                     wantDown = wantDown || cardinal.down.isPressed
-                    wantCamera = wantCamera || cardinal.left.isPressed
-                    wantWeatherNext = wantWeatherNext || cardinal.right.isPressed
+                    wantLeft = wantLeft || cardinal.left.isPressed
+                    wantRight = wantRight || cardinal.right.isPressed
                     if let center = remote.buttons[GCInputDirectionalCenterButton] {
-                        wantHorn = wantHorn || center.isPressed
+                        wantSelect = wantSelect || center.isPressed
                     }
                 } else {
-                    // 1st gen Siri Remote fallback (glass touchpad with no outer ring):
-                    // Use absolute click coordinates so clicking edges/center works like a D-pad without swiping.
                     if !remote.reportsAbsoluteDpadValues {
                         remote.reportsAbsoluteDpadValues = true
                     }
@@ -152,15 +163,15 @@ final class InputController {
                         let x = remote.dpad.xAxis.value
                         let y = remote.dpad.yAxis.value
                         if x * x + y * y < 0.42 * 0.42 {
-                            wantHorn = true
+                            wantSelect = true
                         } else if abs(y) >= abs(x) {
                             if y > 0 { wantUp = true } else { wantDown = true }
                         } else {
-                            if x < 0 { wantCamera = true } else { wantWeatherNext = true }
+                            if x < 0 { wantLeft = true } else { wantRight = true }
                         }
                     }
                 }
-                wantTime = wantTime || remote.buttonX.isPressed
+                wantMenu = wantMenu || remote.buttonX.isPressed
             }
         }
 
@@ -169,32 +180,60 @@ final class InputController {
             func pressed(_ code: GCKeyCode) -> Bool { keys.button(forKeyCode: code)?.isPressed ?? false }
             wantUp = wantUp || pressed(.upArrow) || pressed(.keyW)
             wantDown = wantDown || pressed(.downArrow) || pressed(.keyS)
-            wantWeatherPrev = wantWeatherPrev || pressed(.leftArrow)
-            wantWeatherNext = wantWeatherNext || pressed(.rightArrow)
-            wantHorn = wantHorn || pressed(.spacebar)
+            if menuOpen {
+                wantLeft = wantLeft || pressed(.leftArrow)
+                wantRight = wantRight || pressed(.rightArrow)
+                wantSelect = wantSelect || pressed(.returnOrEnter) || pressed(.spacebar)
+            } else {
+                wantWeatherPrev = wantWeatherPrev || pressed(.leftArrow)
+                wantWeatherNext = wantWeatherNext || pressed(.rightArrow)
+                wantSelect = wantSelect || pressed(.spacebar)
+            }
             wantCamera = wantCamera || pressed(.keyC)
             wantTime = wantTime || pressed(.keyT)
+            wantMenu = wantMenu || pressed(.keyM) || pressed(.tab)
             wantHints = wantHints || pressed(.keyH)
+            wantWorld = wantWorld || pressed(.keyL)
+            wantT1 = wantT1 || pressed(.one)
+            wantT2 = wantT2 || pressed(.two)
+            wantT3 = wantT3 || pressed(.three)
         }
 
-        // Give quick Center clicks on the Apple TV remote a short minimum whistle blast
-        // so taps always sound crisp, while holding Center sustains the whistle indefinitely.
-        if hornTapped || wantHorn {
-            hornPulseTimer = max(hornPulseTimer, hornTapped ? 0.24 : 0)
+        // When driving normally, D-pad Left = Camera and D-pad Right = Weather on Apple TV / Gamepad.
+        if !menuOpen {
+            wantCamera = wantCamera || wantLeft
+            wantWeatherNext = wantWeatherNext || wantRight
+        } else {
+            wantWeatherPrev = wantWeatherPrev || wantLeft
+            wantWeatherNext = wantWeatherNext || wantRight
         }
-        if hornPulseTimer > 0 {
-            hornPulseTimer = max(0, hornPulseTimer - dt)
+
+        if !menuOpen {
+            if selectTapped || wantSelect {
+                hornPulseTimer = max(hornPulseTimer, selectTapped ? 0.24 : 0)
+            }
+            if hornPulseTimer > 0 {
+                hornPulseTimer = max(0, hornPulseTimer - dt)
+            }
+        } else {
+            hornPulseTimer = 0
         }
 
         var commands = InputCommands()
-        commands.throttleUp = up.update(wantUp, dt: dt, repeats: true)
-        commands.throttleDown = down.update(wantDown, dt: dt, repeats: true)
+        commands.throttleUp = up.update(wantUp, dt: dt, repeats: !menuOpen)
+        commands.throttleDown = down.update(wantDown, dt: dt, repeats: !menuOpen)
         commands.nextCamera = camera.update(wantCamera, dt: dt, repeats: false)
         commands.weatherPrevious = weatherPrev.update(wantWeatherPrev, dt: dt, repeats: false)
         commands.weatherNext = weatherNext.update(wantWeatherNext, dt: dt, repeats: false)
         commands.nextTimeOfDay = timeOfDay.update(wantTime, dt: dt, repeats: false)
+        commands.toggleMenu = menu.update(wantMenu, dt: dt, repeats: false)
+        commands.selectTap = selectEdge.update(wantSelect || selectTapped, dt: dt, repeats: false)
         commands.toggleHints = hints.update(wantHints, dt: dt, repeats: false)
-        commands.horn = wantHorn || hornPulseTimer > 0
+        commands.switchWorld = worldKey.update(wantWorld, dt: dt, repeats: false)
+        if train1.update(wantT1, dt: dt, repeats: false) { commands.switchTrain = .steam }
+        if train2.update(wantT2, dt: dt, repeats: false) { commands.switchTrain = .bullet }
+        if train3.update(wantT3, dt: dt, repeats: false) { commands.switchTrain = .freight }
+        commands.horn = !menuOpen && (wantSelect || hornPulseTimer > 0)
         return commands
     }
 }

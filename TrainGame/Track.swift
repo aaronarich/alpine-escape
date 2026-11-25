@@ -1,5 +1,90 @@
 import simd
 
+/// Selectable world landscapes.
+enum WorldTheme: Int, CaseIterable {
+    case alps, tokyo
+
+    var title: String {
+        switch self {
+        case .alps:  return "Swiss Alps"
+        case .tokyo: return "Tokyo"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .alps:  return "mountain.2.fill"
+        case .tokyo: return "building.2.fill"
+        }
+    }
+
+    var stops: [(name: String, fraction: Float)] {
+        switch self {
+        case .alps:
+            return [("Grindelwald", 0.03), ("Kandersteg", 0.36), ("Andermatt", 0.69)]
+        case .tokyo:
+            return [("Shibuya", 0.03), ("Shinjuku", 0.36), ("Tokyo Station", 0.69)]
+        }
+    }
+
+    var cargoTypes: [String] {
+        switch self {
+        case .alps:
+            return ["Alpine Timber", "Swiss Cheese", "Mountain Gear", "Express Mail"]
+        case .tokyo:
+            return ["Electronics", "Ramen Crates", "Robotics Parts", "Express Parcels"]
+        }
+    }
+}
+
+/// Selectable train models with distinct visuals, speeds, and synthesized audio.
+enum TrainKind: Int, CaseIterable {
+    case steam, bullet, freight
+
+    var title: String {
+        switch self {
+        case .steam:   return "Steam Express"
+        case .bullet:  return "Shinkansen Bullet"
+        case .freight: return "Cargo Freight"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .steam:   return "flame.fill"
+        case .bullet:  return "bolt.fill"
+        case .freight: return "shippingbox.fill"
+        }
+    }
+
+    /// Top cruising speed in metres per second.
+    var maxSpeed: Float {
+        switch self {
+        case .steam:   return 27.0  // ~97 km/h
+        case .bullet:  return 56.0  // ~202 km/h
+        case .freight: return 23.5  // ~85 km/h
+        }
+    }
+
+    /// Peak forward acceleration at full throttle.
+    var maxAcceleration: Float {
+        switch self {
+        case .steam:   return 1.25
+        case .bullet:  return 2.45
+        case .freight: return 1.05
+        }
+    }
+
+    /// Peak braking deceleration at full brake.
+    var maxBrake: Float {
+        switch self {
+        case .steam:   return 2.7
+        case .bullet:  return 4.6
+        case .freight: return 2.4
+        }
+    }
+}
+
 struct TrackFrame {
     var position: V3
     var forward: V3
@@ -33,22 +118,25 @@ final class Track {
         let startIndex: Int, endIndex: Int
     }
 
+    let theme: WorldTheme
     let points: [V3]
     let length: Float
     let viaduct: TrackSpan
     let tunnel: TrackSpan
+    let wash: TrackSpan
 
     private let spacing: Float
     private let coarsePoints: [V3]
     private let coarseDistances: [Float]
     private let segments: [Segment]
 
-    init() {
+    init(theme: WorldTheme = .alps) {
+        self.theme = theme
         let dense = 24000
         var raw: [V3] = []
         raw.reserveCapacity(dense + 1)
         for i in 0...dense {
-            raw.append(Track.curve(Float(i) / Float(dense) * 2 * .pi))
+            raw.append(Track.curve(Float(i) / Float(dense) * 2 * .pi, theme: theme))
         }
         var cumulative: [Float] = [0]
         cumulative.reserveCapacity(dense + 1)
@@ -73,11 +161,13 @@ final class Track {
         length = total
         spacing = step
 
-        // Place iconic landmarks cleanly between Grindelwald (0.03), Kandersteg (0.36) and Andermatt (0.69).
+        // Place iconic landmarks cleanly between stations (0.03, 0.36, 0.69).
         viaduct = TrackSpan(start: total * 0.155, end: total * 0.225)
         tunnel = TrackSpan(start: total * 0.485, end: total * 0.555)
+        let washCenter = total * 0.84
+        wash = TrackSpan(start: washCenter - 15, end: washCenter + 15)
 
-        // Coarse spatial acceleration structure for fast nearest-track queries during terrain & tree setup.
+        // Coarse spatial acceleration structure for fast nearest-track queries.
         let coarseStride = 6
         var cPoints: [V3] = []
         var cDist: [Float] = []
@@ -114,10 +204,16 @@ final class Track {
         segments = builtSegments
     }
 
-    /// The loop's shape: a wobbly ring that climbs and descends gently through the Alps.
-    private static func curve(_ a: Float) -> V3 {
+    /// The loop's shape: gentle alpine climbs in the Alps, flatter express grades in Tokyo.
+    private static func curve(_ a: Float, theme: WorldTheme) -> V3 {
         let r = 650 + 120 * sin(3 * a + 0.7) + 50 * sin(5 * a + 2.1)
-        let y = 40 + 8 * sin(2 * a + 0.4) + 3 * sin(3 * a + 1.0)
+        let y: Float
+        switch theme {
+        case .alps:
+            y = 40 + 8 * sin(2 * a + 0.4) + 3 * sin(3 * a + 1.0)
+        case .tokyo:
+            y = 26 + 3.0 * sin(2 * a + 0.4) + 1.2 * sin(3 * a + 1.0)
+        }
         return V3(cos(a) * r, y, sin(a) * r)
     }
 
@@ -154,12 +250,10 @@ final class Track {
         return f.position + f.side * lateral + f.up * height
     }
 
-    /// Sine of track slope (+ uphill, - downhill).
     func grade(at d: Float) -> Float {
         frame(at: d).forward.y
     }
 
-    /// Signed horizontal curvature (rad/m; positive curves toward +side).
     func curvature(at d: Float) -> Float {
         let f0 = frame(at: d - 6)
         let f1 = frame(at: d + 6)
@@ -175,6 +269,10 @@ final class Track {
         tunnel.contains(wrap(d), margin: margin)
     }
 
+    func isInWash(_ d: Float, margin: Float = 0) -> Bool {
+        wash.contains(wrap(d), margin: margin)
+    }
+
     func viaductFactor(at d: Float) -> Float {
         viaduct.factor(at: wrap(d), fade: 10)
     }
@@ -183,9 +281,12 @@ final class Track {
         tunnel.factor(at: wrap(d), fade: 14)
     }
 
+    func washFactor(at d: Float) -> Float {
+        wash.factor(at: wrap(d), fade: 4)
+    }
+
     /// Fast AABB-pruned nearest-point query against the coarse track loop.
     func nearest(x: Float, z: Float) -> (distance: Float, along: Float, y: Float) {
-        // First find the segment whose 2D bounding box is closest to tighten the pruning bound immediately.
         var bestSeg = 0
         var bestBoxSq = Float.greatestFiniteMagnitude
         for i in 0..<segments.count {
