@@ -1297,13 +1297,13 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             if tunnelBlend > 0.12 { clampToTerrain = false }
 
         case .cab:
-            // Seated right inside the front cab looking cleanly out over the animated 3D dashboard!
-            let cab = track.frame(at: head - (train.kind == .bullet ? 3.5 : 4.2))
+            // Positioned right at the front of the locomotive so no dome, roof, or nose ever obstructs the windshield!
+            let cab = track.frame(at: head + 0.6)
             let sway = sin(odometer * 0.38) * 0.025 * min(speed / 12, 1)
-            let cabH: Float = train.kind == .bullet ? 2.95 : 3.35
+            let cabH: Float = train.kind == .bullet ? 2.95 : 3.25
             position = cab.position + cab.side * sway + cab.up * (Train.railTop + cabH)
             target = position + cab.forward * 65 - up * 2.4
-            if track.isInTunnel(head - 4.0, margin: 12) { clampToTerrain = false }
+            if track.isInTunnel(head + 0.6, margin: 12) { clampToTerrain = false }
 
         case .side:
             position = middle.position - middle.side * 44 + up * 7

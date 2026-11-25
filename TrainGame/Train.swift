@@ -800,32 +800,36 @@ final class CabDashboard {
         }
 
         // Windshield A-pillars & overhead sun visor
-        addBox(0.075, 1.12, 0.08, darkFrame, at: V3(-0.88, 0.04, -0.92), euler: V3(0, 0, -0.05))
-        addBox(0.075, 1.12, 0.08, darkFrame, at: V3(0.88, 0.04, -0.92), euler: V3(0, 0, 0.05))
-        addBox(1.88, 0.09, 0.12, darkFrame, at: V3(0, 0.51, -0.92))
-        addBox(1.82, 0.016, 0.04, trimMat, at: V3(0, 0.464, -0.88))
+        addBox(0.075, 1.15, 0.08, darkFrame, at: V3(-0.88, 0.05, -0.92), euler: V3(0, 0, -0.04))
+        addBox(0.075, 1.15, 0.08, darkFrame, at: V3(0.88, 0.05, -0.92), euler: V3(0, 0, 0.04))
+        addBox(1.88, 0.09, 0.12, darkFrame, at: V3(0, 0.505, -0.92))
+        addBox(1.82, 0.016, 0.04, trimMat, at: V3(0, 0.458, -0.88))
 
-        // Main sloped control desk raised cleanly into the lower-third safe zone (never cut off on TV!)
-        addBox(1.94, 0.34, 0.36, deskMat, at: V3(0, -0.355, -0.92), euler: V3(0.22, 0, 0), chamfer: 0.02)
-        // Lower skirt extending safely past the bottom edge for any screen aspect ratio
-        addBox(1.94, 0.26, 0.18, darkFrame, at: V3(0, -0.52, -0.86), chamfer: 0)
-        // Accent trim lip across the upper sill of the console
-        addBox(1.86, 0.018, 0.03, trimMat, at: V3(0, -0.175, -0.99))
+        // Clean two-tier cockpit console:
+        // 1) Flat glare-shield upper sill at y = -0.185 (behind the instrument face)
+        // 2) Vertical-angled instrument faceplate at z = -0.88 facing the driver so EVERY gauge, lamp,
+        //    switch, and lever sits 100% IN FRONT OF the panel with zero clipping!
+        addBox(1.94, 0.045, 0.24, deskMat, at: V3(0, -0.185, -0.98), chamfer: 0.01)
+        addBox(1.88, 0.016, 0.025, trimMat, at: V3(0, -0.164, -0.875))
+        // Vertical instrument dashboard backing panel (sits at z = -0.91, thickness 0.06 -> front face at z = -0.88)
+        addBox(1.94, 0.42, 0.06, deskMat, at: V3(0, -0.39, -0.91), chamfer: 0.008)
+        // Lower horizontal knee shelf extending cleanly below the instruments
+        addBox(1.94, 0.05, 0.22, darkFrame, at: V3(0, -0.385, -0.80), chamfer: 0.008)
 
-        // Twin automatic windshield wipers mounted right along the windshield sill
+        // Twin automatic windshield wipers mounted cleanly along the windshield sill
         func buildWiper(_ pivot: SCNNode, at pos: V3) {
             pivot.simdPosition = pos
-            let arm = SCNBox(width: 0.008, height: 0.24, length: 0.006, chamferRadius: 0)
+            let arm = SCNBox(width: 0.009, height: 0.25, length: 0.006, chamferRadius: 0)
             arm.materials = [darkFrame]
             let armNode = SCNNode(geometry: arm)
-            armNode.simdPosition = V3(0, 0.12, 0)
+            armNode.simdPosition = V3(0, 0.125, 0)
             armNode.castsShadow = false
             pivot.addChildNode(armNode)
 
-            let blade = SCNBox(width: 0.012, height: 0.19, length: 0.008, chamferRadius: 0)
+            let blade = SCNBox(width: 0.013, height: 0.20, length: 0.008, chamferRadius: 0)
             blade.materials = [darkFrame]
             let bladeNode = SCNNode(geometry: blade)
-            bladeNode.simdPosition = V3(0.008, 0.21, -0.003)
+            bladeNode.simdPosition = V3(0.008, 0.22, -0.003)
             bladeNode.castsShadow = false
             pivot.addChildNode(bladeNode)
 
@@ -838,74 +842,74 @@ final class CabDashboard {
             pivot.simdEulerAngles = V3(0, 0, -1.28)
             root.addChildNode(pivot)
         }
-        buildWiper(wiperLeftPivot, at: V3(-0.22, -0.168, -0.985))
-        buildWiper(wiperRightPivot, at: V3(0.28, -0.168, -0.985))
+        buildWiper(wiperLeftPivot, at: V3(-0.22, -0.158, -0.96))
+        buildWiper(wiperRightPivot, at: V3(0.28, -0.158, -0.96))
 
-        // 1. Live Analog Speedometer & Power/Pressure Gauges (comfortably above bottom edge!)
-        buildGauge(at: V3(-0.34, -0.228, -0.85), radius: 0.066, needlePivot: speedNeedlePivot,
+        // 1. Live Analog Speedometer & Power/Pressure Gauges (mounted proud at z = -0.865 on the panel face!)
+        buildGauge(at: V3(-0.33, -0.265, -0.865), radius: 0.070, needlePivot: speedNeedlePivot,
                    needleColor: rgb(1.0, 0.24, 0.16))
-        buildGauge(at: V3(-0.15, -0.228, -0.85), radius: 0.058, needlePivot: powerNeedlePivot,
+        buildGauge(at: V3(-0.145, -0.265, -0.865), radius: 0.060, needlePivot: powerNeedlePivot,
                    needleColor: rgb(1.0, 0.80, 0.16))
 
-        // 2. Central Illuminated Status Lamps (Signal / Brake / Horn / Headlight / Wipers)
+        // 2. Central Illuminated Status Lamps (Signal / Brake / Horn / Headlight / Wipers) at y = -0.235
         let lamps: [(x: Float, mat: SCNMaterial)] = [
             (-0.02, signalLampMat),
-            (0.032, brakeLampMat),
-            (0.084, hornLampMat),
-            (0.136, headlightLampMat),
-            (0.188, wiperLampMat),
+            (0.036, brakeLampMat),
+            (0.092, hornLampMat),
+            (0.148, headlightLampMat),
+            (0.204, wiperLampMat),
         ]
         for (lx, lMat) in lamps {
             lMat.lightingModel = .blinn
-            let bezel = SCNCylinder(radius: 0.017, height: 0.014); bezel.radialSegmentCount = 12
+            let bezel = SCNCylinder(radius: 0.018, height: 0.016); bezel.radialSegmentCount = 12
             bezel.materials = [trimMat]
             let bn = SCNNode(geometry: bezel)
-            bn.simdPosition = V3(lx, -0.212, -0.84)
-            bn.simdEulerAngles = V3(1.15, 0, 0)
+            bn.simdPosition = V3(lx, -0.232, -0.868)
+            bn.simdEulerAngles = V3(.pi / 2, 0, 0)
             bn.castsShadow = false
             root.addChildNode(bn)
 
-            let lens = SCNSphere(radius: 0.0125); lens.segmentCount = 10
+            let lens = SCNSphere(radius: 0.0135); lens.segmentCount = 10
             lens.materials = [lMat]
             let ln = SCNNode(geometry: lens)
-            ln.simdPosition = V3(lx, -0.207, -0.833)
+            ln.simdPosition = V3(lx, -0.232, -0.858)
             ln.castsShadow = false
             root.addChildNode(ln)
         }
 
-        // Row of 5 metallic toggle switches right below the lamps
+        // Row of 5 metallic toggle switches cleanly visible below the lamps at y = -0.298
         for i in 0..<5 {
-            let sx = -0.02 + Float(i) * 0.052
-            addBox(0.022, 0.028, 0.014, darkFrame, at: V3(sx, -0.268, -0.825), euler: V3(-0.35, 0, 0), chamfer: 0.002)
-            let toggle = SCNCylinder(radius: 0.0038, height: 0.024); toggle.radialSegmentCount = 8
+            let sx = -0.02 + Float(i) * 0.056
+            addBox(0.024, 0.034, 0.014, darkFrame, at: V3(sx, -0.298, -0.870), chamfer: 0.002)
+            let toggle = SCNCylinder(radius: 0.0042, height: 0.028); toggle.radialSegmentCount = 8
             toggle.materials = [chrome]
             let tn = SCNNode(geometry: toggle)
-            tn.simdPosition = V3(sx, -0.265, -0.815)
-            tn.simdEulerAngles = V3(i % 2 == 0 ? 1.25 : 0.75, 0, 0)
+            tn.simdPosition = V3(sx, -0.298, -0.854)
+            tn.simdEulerAngles = V3(i % 2 == 0 ? 1.15 : 1.95, 0, 0)
             tn.castsShadow = false
             root.addChildNode(tn)
         }
 
-        // 3. Physical Moving Throttle / Brake Lever Quadrant on the right side of the console
-        let qPos = V3(0.34, -0.245, -0.84)
-        addBox(0.085, 0.022, 0.16, darkFrame, at: qPos, euler: V3(0.22, 0, 0), chamfer: 0.005)
+        // 3. Physical Moving Throttle / Brake Lever Quadrant on the right side (fully visible on knee shelf!)
+        let qPos = V3(0.36, -0.355, -0.80)
+        addBox(0.095, 0.028, 0.16, darkFrame, at: qPos, chamfer: 0.005)
         let greenMat = SCNMaterial(); greenMat.lightingModel = .constant; greenMat.diffuse.contents = rgb(0.2, 0.88, 0.36)
         let redMat = SCNMaterial(); redMat.lightingModel = .constant; redMat.diffuse.contents = rgb(0.95, 0.22, 0.18)
-        addBox(0.012, 0.006, 0.065, greenMat, at: qPos + V3(-0.028, 0.015, -0.036), euler: V3(0.22, 0, 0), chamfer: 0)
-        addBox(0.012, 0.006, 0.055, redMat, at: qPos + V3(-0.028, 0.003, 0.038), euler: V3(0.22, 0, 0), chamfer: 0)
+        addBox(0.014, 0.008, 0.065, greenMat, at: qPos + V3(-0.030, 0.016, -0.035), chamfer: 0)
+        addBox(0.014, 0.008, 0.058, redMat, at: qPos + V3(-0.030, 0.016, 0.036), chamfer: 0)
 
-        throttleLeverPivot.simdPosition = qPos + V3(0, 0.005, 0)
-        let shaft = SCNCylinder(radius: 0.007, height: 0.125); shaft.radialSegmentCount = 10
+        throttleLeverPivot.simdPosition = qPos + V3(0, 0.01, 0)
+        let shaft = SCNCylinder(radius: 0.0075, height: 0.145); shaft.radialSegmentCount = 10
         shaft.materials = [chrome]
         let shaftNode = SCNNode(geometry: shaft)
-        shaftNode.simdPosition = V3(0, 0.062, 0)
+        shaftNode.simdPosition = V3(0, 0.072, 0)
         shaftNode.castsShadow = false
         throttleLeverPivot.addChildNode(shaftNode)
 
-        let handle = SCNCylinder(radius: 0.0155, height: 0.075); handle.radialSegmentCount = 12
+        let handle = SCNCylinder(radius: 0.017, height: 0.082); handle.radialSegmentCount = 12
         handle.materials = [knobMat]
         let handleNode = SCNNode(geometry: handle)
-        handleNode.simdPosition = V3(0, 0.125, 0)
+        handleNode.simdPosition = V3(0, 0.145, 0)
         handleNode.simdEulerAngles = V3(0, 0, .pi / 2)
         handleNode.castsShadow = false
         throttleLeverPivot.addChildNode(handleNode)
@@ -915,7 +919,7 @@ final class CabDashboard {
     private func buildGauge(at pos: V3, radius: Float, needlePivot: SCNNode, needleColor: PColor) {
         let holder = SCNNode()
         holder.simdPosition = pos
-        holder.simdEulerAngles = V3(-0.32, 0, 0)
+        holder.simdEulerAngles = V3(-0.08, 0, 0)
 
         // Outer metallic bezel
         let bezel = SCNCylinder(radius: CGFloat(radius * 1.12), height: 0.022); bezel.radialSegmentCount = 20
