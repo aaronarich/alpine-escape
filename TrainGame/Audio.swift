@@ -36,6 +36,7 @@ final class TrainAudio {
         var viaduct: Float = 0
         var tunnel: Float = 0
         var wash: Float = 0
+        var crossingBell: Float = 0
         var trainKind: Int = 0      // 0 = steam, 1 = bullet, 2 = freight
         var isUrban = false
         var thunderRequests: UInt32 = 0
@@ -53,8 +54,13 @@ final class TrainAudio {
     private var seed: UInt32 = 0x1234_5678
     private var sSpeed: Float = 0, sPower: Float = 0, sBrake: Float = 0
     private var sRain: Float = 0, sWind: Float = 0, sNight: Float = 0
-    private var sViaduct: Float = 0, sTunnel: Float = 0, sWash: Float = 0
+    private var sViaduct: Float = 0, sTunnel: Float = 0, sWash: Float = 0, sCrossing: Float = 0
     private var wasBrakingMoving = false
+
+    // Crossing bell ("ding-ding-ding-ding" when approaching a road crossing)
+    private var xBellPhase: Float = 0
+    private var xBellEnv: Float = 0
+    private var xBellPa: Float = 0, xBellPb: Float = 0, xBellPc: Float = 0
 
     // 1a. Steam locomotive (punchy pitched cylinder boom + tight resonant steam puff + side rod tap)
     private var chuffPhase: Float = 0
@@ -154,7 +160,8 @@ final class TrainAudio {
 
     func update(speed: Float, power: Float, brake: Float, hornOn: Bool,
                 rain: Float, wind: Float, night: Float, viaduct: Float,
-                tunnel: Float, wash: Float, trainKind: TrainKind, isUrban: Bool) {
+                tunnel: Float, wash: Float, crossingBell: Float,
+                trainKind: TrainKind, isUrban: Bool) {
         shared.withLock { state in
             state.speed = speed
             state.power = power
@@ -166,6 +173,7 @@ final class TrainAudio {
             state.viaduct = viaduct
             state.tunnel = tunnel
             state.wash = wash
+            state.crossingBell = crossingBell
             state.trainKind = trainKind.rawValue
             state.isUrban = isUrban
         }
@@ -281,6 +289,7 @@ final class TrainAudio {
         sViaduct += (p.viaduct - sViaduct) * 0.0003
         sTunnel += (p.tunnel - sTunnel) * 0.0003
         sWash += (p.wash - sWash) * 0.0008
+        sCrossing += (p.crossingBell - sCrossing) * 0.0005
 
         var outL: Float = 0
         var outR: Float = 0
@@ -573,6 +582,28 @@ final class TrainAudio {
                 let pop = sin(6.2831853 * bubblePhase) * bubbleEnv * 0.045 * sWash
                 outL += pop; outR += pop
             }
+        }
+
+        // =====================================================================
+        // 6b. RAILROAD CROSSING BELL ("ding-ding-ding-ding" as train approaches!)
+        // =====================================================================
+        if sCrossing > 0.015 {
+            xBellPhase += 2.35 * dt
+            if xBellPhase >= 1 {
+                xBellPhase -= 1
+                xBellEnv = 1.0
+            }
+        }
+        if xBellEnv > 0.001 {
+            xBellPa += 784.0 * dt; if xBellPa >= 1 { xBellPa -= 1 }
+            xBellPb += 1572.0 * dt; if xBellPb >= 1 { xBellPb -= 1 }
+            xBellPc += 2168.0 * dt; if xBellPc >= 1 { xBellPc -= 1 }
+            let ring = (sin(6.2831853 * xBellPa) * 0.60
+                        + sin(6.2831853 * xBellPb) * 0.28 * xBellEnv
+                        + sin(6.2831853 * xBellPc) * 0.14 * xBellEnv * xBellEnv) * xBellEnv * max(sCrossing, 0.15)
+            xBellEnv *= max(0, 1 - 6.2 * dt)
+            outL += ring * 0.095
+            outR += ring * 0.085
         }
 
         // =====================================================================

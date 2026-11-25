@@ -651,3 +651,270 @@ final class Train {
         }
     }
 }
+
+/// Interactive 3D cab interior cockpit mounted to the camera in Cab View.
+/// Features live animated speedometer & pressure dials, a moving throttle/brake lever,
+/// illuminated toggle switches, and station approach/stop indicator lamps.
+final class CabDashboard {
+    let root = SCNNode()
+
+    private let deskMat = SCNMaterial()
+    private let trimMat = SCNMaterial()
+    private let knobMat = SCNMaterial()
+
+    private let speedNeedlePivot = SCNNode()
+    private let powerNeedlePivot = SCNNode()
+    private let throttleLeverPivot = SCNNode()
+
+    private let hornLampMat = SCNMaterial()
+    private let brakeLampMat = SCNMaterial()
+    private let headlightLampMat = SCNMaterial()
+    private let signalLampMat = SCNMaterial()
+    private let switchToggleNodes: [SCNNode] = []
+
+    private var smoothSpeedNeedle: Float = 0
+    private var smoothPowerNeedle: Float = 0
+    private var smoothLeverAngle: Float = 0
+
+    init() {
+        root.isHidden = true
+        build()
+        applyTheme(.steam)
+    }
+
+    func applyTheme(_ kind: TrainKind) {
+        switch kind {
+        case .steam:
+            deskMat.diffuse.contents = rgb(0.10, 0.16, 0.12)
+            trimMat.diffuse.contents = rgb(0.84, 0.65, 0.22)     // gleaming brass
+            knobMat.diffuse.contents = rgb(0.78, 0.12, 0.10)     // classic red steam handle
+        case .bullet:
+            deskMat.diffuse.contents = rgb(0.16, 0.18, 0.22)
+            trimMat.diffuse.contents = rgb(0.18, 0.56, 0.96)     // Shinkansen cobalt trim
+            knobMat.diffuse.contents = rgb(0.12, 0.42, 0.86)
+        case .freight:
+            deskMat.diffuse.contents = rgb(0.14, 0.15, 0.17)
+            trimMat.diffuse.contents = rgb(0.92, 0.70, 0.12)     // industrial hazard yellow
+            knobMat.diffuse.contents = rgb(0.92, 0.68, 0.10)
+        }
+    }
+
+    /// Updates all live 3D gauges, levers, and indicator lamps each frame.
+    /// `signalState`: 0 = clear/off, 1 = caution amber, 2 = brake/stop red, 3 = go green.
+    func update(dt: Float, speedNorm: Float, notch: Int, hornOn: Bool,
+                headlightOn: Bool, signalState: Int, time: Float) {
+        let k = 1 - exp(-dt * 9.0)
+
+        // Speedometer needle: sweeps from +2.15 rad (left, 0 km/h) to -2.15 rad (right, max speed).
+        let targetSpeedAngle = lerp(2.15, -2.15, clamp(speedNorm, 0, 1))
+        smoothSpeedNeedle += (targetSpeedAngle - smoothSpeedNeedle) * k
+        speedNeedlePivot.simdEulerAngles = V3(0, 0, smoothSpeedNeedle)
+
+        // Power/Pressure gauge needle: sweeps with notch (-3...4).
+        let notchNorm = clamp(Float(notch - Game.minNotch) / Float(Game.maxNotch - Game.minNotch), 0, 1)
+        let targetPowerAngle = lerp(2.0, -2.0, notchNorm)
+        smoothPowerNeedle += (targetPowerAngle - smoothPowerNeedle) * k
+        powerNeedlePivot.simdEulerAngles = V3(0, 0, smoothPowerNeedle)
+
+        // Physical throttle/brake lever tilts forward (+notch) or pulls back (-notch).
+        let targetLever = Float(notch) * -0.14
+        smoothLeverAngle += (targetLever - smoothLeverAngle) * k
+        throttleLeverPivot.simdEulerAngles = V3(smoothLeverAngle, 0, 0)
+
+        // Indicator lamps
+        hornLampMat.emission.contents = hornOn ? rgb(1.0, 0.78, 0.12) : rgb(0.08, 0.06, 0.02)
+        hornLampMat.diffuse.contents = hornOn ? rgb(1.0, 0.84, 0.24) : rgb(0.26, 0.22, 0.12)
+
+        let braking = notch < 0
+        brakeLampMat.emission.contents = braking ? rgb(1.0, 0.14, 0.10) : rgb(0.08, 0.02, 0.02)
+        brakeLampMat.diffuse.contents = braking ? rgb(1.0, 0.24, 0.18) : rgb(0.28, 0.12, 0.12)
+
+        headlightLampMat.emission.contents = headlightOn ? rgb(0.35, 0.88, 1.0) : rgb(0.03, 0.08, 0.10)
+        headlightLampMat.diffuse.contents = headlightOn ? rgb(0.55, 0.94, 1.0) : rgb(0.14, 0.22, 0.26)
+
+        let blink: Float = sin(time * 8.0) > 0 ? 1.0 : 0.30
+        switch signalState {
+        case 1: // Approach caution (pulsing amber)
+            signalLampMat.emission.contents = rgb(1.0 * blink, 0.68 * blink, 0.08)
+            signalLampMat.diffuse.contents = rgb(1.0, 0.75, 0.16)
+        case 2: // Brake / Stop zone (bright flashing red!)
+            signalLampMat.emission.contents = rgb(1.0 * blink, 0.10 * blink, 0.08)
+            signalLampMat.diffuse.contents = rgb(1.0, 0.18, 0.14)
+        case 3: // All aboard / Go (solid emerald green)
+            signalLampMat.emission.contents = rgb(0.16, 0.96, 0.38)
+            signalLampMat.diffuse.contents = rgb(0.24, 1.0, 0.46)
+        default:
+            signalLampMat.emission.contents = rgb(0.04, 0.06, 0.05)
+            signalLampMat.diffuse.contents = rgb(0.15, 0.18, 0.16)
+        }
+    }
+
+    private func build() {
+        deskMat.lightingModel = .blinn
+        deskMat.specular.contents = rgb(0.25, 0.25, 0.28)
+        trimMat.lightingModel = .blinn
+        trimMat.specular.contents = rgb(0.55, 0.55, 0.55)
+        knobMat.lightingModel = .blinn
+
+        let darkFrame = SCNMaterial()
+        darkFrame.lightingModel = .blinn
+        darkFrame.diffuse.contents = rgb(0.06, 0.07, 0.09)
+
+        let chrome = SCNMaterial()
+        chrome.lightingModel = .blinn
+        chrome.diffuse.contents = rgb(0.78, 0.80, 0.84)
+        chrome.specular.contents = rgb(0.9, 0.9, 0.9)
+
+        func addBox(_ w: Float, _ h: Float, _ l: Float, _ mat: SCNMaterial, at pos: V3,
+                    euler: V3 = V3(0, 0, 0), chamfer: Float = 0.006, to parent: SCNNode = root) {
+            let g = SCNBox(width: CGFloat(w), height: CGFloat(h), length: CGFloat(l), chamferRadius: CGFloat(chamfer))
+            g.materials = [mat]
+            let n = SCNNode(geometry: g)
+            n.simdPosition = pos
+            n.simdEulerAngles = euler
+            n.castsShadow = false
+            parent.addChildNode(n)
+        }
+
+        // Windshield A-pillars & overhead sun visor (subtle cab framing, wide open sightline)
+        addBox(0.08, 1.05, 0.08, darkFrame, at: V3(-0.84, 0.0, -0.88), euler: V3(0, 0, -0.06))
+        addBox(0.08, 1.05, 0.08, darkFrame, at: V3(0.84, 0.0, -0.88), euler: V3(0, 0, 0.06))
+        addBox(1.82, 0.09, 0.12, darkFrame, at: V3(0, 0.485, -0.88))
+        addBox(1.76, 0.018, 0.04, trimMat, at: V3(0, 0.438, -0.84))
+
+        // Main sloped control desk along the bottom of the windshield
+        addBox(1.88, 0.28, 0.34, deskMat, at: V3(0, -0.42, -0.88), euler: V3(0.24, 0, 0), chamfer: 0.02)
+        // Accent trim lip across top edge of console
+        addBox(1.80, 0.018, 0.03, trimMat, at: V3(0, -0.272, -0.96))
+
+        // 1. Live Analog Speedometer & Power/Pressure Gauges
+        buildGauge(at: V3(-0.34, -0.325, -0.81), radius: 0.072, needlePivot: speedNeedlePivot,
+                   needleColor: rgb(1.0, 0.24, 0.16))
+        buildGauge(at: V3(-0.14, -0.325, -0.81), radius: 0.062, needlePivot: powerNeedlePivot,
+                   needleColor: rgb(1.0, 0.80, 0.16))
+
+        // 2. Central Illuminated Status Lamps (Signal / Horn / Brake / Headlight)
+        let lamps: [(x: Float, mat: SCNMaterial)] = [
+            (0.01, signalLampMat),
+            (0.065, brakeLampMat),
+            (0.12, hornLampMat),
+            (0.175, headlightLampMat),
+        ]
+        for (lx, lMat) in lamps {
+            lMat.lightingModel = .blinn
+            // Small raised bezel + glowing round dome lens
+            let bezel = SCNCylinder(radius: 0.019, height: 0.014); bezel.radialSegmentCount = 12
+            bezel.materials = [trimMat]
+            let bn = SCNNode(geometry: bezel)
+            bn.simdPosition = V3(lx, -0.312, -0.80)
+            bn.simdEulerAngles = V3(1.15, 0, 0)
+            bn.castsShadow = false
+            root.addChildNode(bn)
+
+            let lens = SCNSphere(radius: 0.014); lens.segmentCount = 10
+            lens.materials = [lMat]
+            let ln = SCNNode(geometry: lens)
+            ln.simdPosition = V3(lx, -0.306, -0.793)
+            ln.castsShadow = false
+            root.addChildNode(ln)
+        }
+
+        // Row of metallic toggle switches below the lamps
+        for i in 0..<4 {
+            let sx = 0.01 + Float(i) * 0.055
+            addBox(0.024, 0.030, 0.014, darkFrame, at: V3(sx, -0.365, -0.785), euler: V3(-0.35, 0, 0), chamfer: 0.002)
+            let toggle = SCNCylinder(radius: 0.004, height: 0.026); toggle.radialSegmentCount = 8
+            toggle.materials = [chrome]
+            let tn = SCNNode(geometry: toggle)
+            tn.simdPosition = V3(sx, -0.362, -0.774)
+            tn.simdEulerAngles = V3(i % 2 == 0 ? 1.25 : 0.75, 0, 0)
+            tn.castsShadow = false
+            root.addChildNode(tn)
+        }
+
+        // 3. Physical Moving Throttle / Brake Lever Quadrant on the right side of the console
+        let qPos = V3(0.32, -0.335, -0.80)
+        addBox(0.085, 0.022, 0.16, darkFrame, at: qPos, euler: V3(0.24, 0, 0), chamfer: 0.005)
+        // Green power & red brake slot accents
+        let greenMat = SCNMaterial(); greenMat.lightingModel = .constant; greenMat.diffuse.contents = rgb(0.2, 0.88, 0.36)
+        let redMat = SCNMaterial(); redMat.lightingModel = .constant; redMat.diffuse.contents = rgb(0.95, 0.22, 0.18)
+        addBox(0.012, 0.006, 0.065, greenMat, at: qPos + V3(-0.028, 0.016, -0.036), euler: V3(0.24, 0, 0), chamfer: 0)
+        addBox(0.012, 0.006, 0.055, redMat, at: qPos + V3(-0.028, 0.004, 0.038), euler: V3(0.24, 0, 0), chamfer: 0)
+
+        throttleLeverPivot.simdPosition = qPos + V3(0, 0.005, 0)
+        let shaft = SCNCylinder(radius: 0.007, height: 0.13); shaft.radialSegmentCount = 10
+        shaft.materials = [chrome]
+        let shaftNode = SCNNode(geometry: shaft)
+        shaftNode.simdPosition = V3(0, 0.065, 0)
+        shaftNode.castsShadow = false
+        throttleLeverPivot.addChildNode(shaftNode)
+
+        let handle = SCNCylinder(radius: 0.016, height: 0.075); handle.radialSegmentCount = 12
+        handle.materials = [knobMat]
+        let handleNode = SCNNode(geometry: handle)
+        handleNode.simdPosition = V3(0, 0.13, 0)
+        handleNode.simdEulerAngles = V3(0, 0, .pi / 2)
+        handleNode.castsShadow = false
+        throttleLeverPivot.addChildNode(handleNode)
+        root.addChildNode(throttleLeverPivot)
+    }
+
+    private func buildGauge(at pos: V3, radius: Float, needlePivot: SCNNode, needleColor: PColor) {
+        let holder = SCNNode()
+        holder.simdPosition = pos
+        holder.simdEulerAngles = V3(-0.32, 0, 0)
+
+        // Outer metallic bezel
+        let bezel = SCNCylinder(radius: CGFloat(radius * 1.12), height: 0.022); bezel.radialSegmentCount = 20
+        bezel.materials = [trimMat]
+        let bezelNode = SCNNode(geometry: bezel)
+        bezelNode.simdEulerAngles = V3(.pi / 2, 0, 0)
+        bezelNode.castsShadow = false
+        holder.addChildNode(bezelNode)
+
+        // Softly backlit dark instrument face
+        let faceMat = SCNMaterial()
+        faceMat.lightingModel = .constant
+        faceMat.diffuse.contents = rgb(0.08, 0.10, 0.13)
+        let face = SCNCylinder(radius: CGFloat(radius), height: 0.025); face.radialSegmentCount = 20
+        face.materials = [faceMat]
+        let faceNode = SCNNode(geometry: face)
+        faceNode.simdEulerAngles = V3(.pi / 2, 0, 0)
+        faceNode.castsShadow = false
+        holder.addChildNode(faceNode)
+
+        // Glowing tick marks around the 240° dial arc
+        let tickWhite = SCNMaterial(); tickWhite.lightingModel = .constant; tickWhite.diffuse.contents = rgb(0.92, 0.94, 0.96)
+        let tickRed = SCNMaterial(); tickRed.lightingModel = .constant; tickRed.diffuse.contents = rgb(0.98, 0.28, 0.22)
+        for i in 0...8 {
+            let t = Float(i) / 8.0
+            let angle = lerp(2.15, -2.15, t)
+            let tick = SCNBox(width: 0.004, height: CGFloat(radius * 0.22), length: 0.004, chamferRadius: 0)
+            tick.materials = [i >= 7 ? tickRed : tickWhite]
+            let tn = SCNNode(geometry: tick)
+            tn.simdPosition = V3(-sin(angle) * radius * 0.78, cos(angle) * radius * 0.78, 0.014)
+            tn.simdEulerAngles = V3(0, 0, angle)
+            tn.castsShadow = false
+            holder.addChildNode(tn)
+        }
+
+        // Animated glowing needle
+        needlePivot.simdPosition = V3(0, 0, 0.017)
+        let nMat = SCNMaterial(); nMat.lightingModel = .constant; nMat.diffuse.contents = needleColor
+        let needle = SCNBox(width: 0.0055, height: CGFloat(radius * 0.74), length: 0.004, chamferRadius: 0)
+        needle.materials = [nMat]
+        let needleNode = SCNNode(geometry: needle)
+        needleNode.simdPosition = V3(0, radius * 0.30, 0)
+        needleNode.castsShadow = false
+        needlePivot.addChildNode(needleNode)
+
+        let cap = SCNSphere(radius: 0.009); cap.segmentCount = 8
+        cap.materials = [trimMat]
+        let capNode = SCNNode(geometry: cap)
+        capNode.castsShadow = false
+        needlePivot.addChildNode(capNode)
+
+        holder.addChildNode(needlePivot)
+        root.addChildNode(holder)
+    }
+}

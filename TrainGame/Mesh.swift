@@ -136,6 +136,39 @@ struct MeshBuilder {
         }
     }
 
+    /// Low-poly faceted ellipsoid puff (subdivided octahedron) for fluffy, organic clouds.
+    mutating func cloudPuff(center: V3, radius: V3, color: RGBA) {
+        let baseOcta: [(V3, V3, V3)] = [
+            (V3(0, 1, 0), V3(0, 0, 1), V3(1, 0, 0)),
+            (V3(0, 1, 0), V3(1, 0, 0), V3(0, 0, -1)),
+            (V3(0, 1, 0), V3(0, 0, -1), V3(-1, 0, 0)),
+            (V3(0, 1, 0), V3(-1, 0, 0), V3(0, 0, 1)),
+            (V3(0, -1, 0), V3(1, 0, 0), V3(0, 0, 1)),
+            (V3(0, -1, 0), V3(0, 0, -1), V3(1, 0, 0)),
+            (V3(0, -1, 0), V3(-1, 0, 0), V3(0, 0, -1)),
+            (V3(0, -1, 0), V3(0, 0, 1), V3(-1, 0, 0)),
+        ]
+        func emit(_ a: V3, _ b: V3, _ c: V3) {
+            let pa = center + a * radius
+            let pb = center + b * radius
+            let pc = center + c * radius
+            let avgY = (a.y + b.y + c.y) / 3.0
+            // Soft warm sunlit tops, gently shaded cool undersides.
+            let shade = lerp(0.84, 1.0, clamp((avgY + 1.0) * 0.5, 0, 1))
+            tri(pa, pb, pc, RGBA(color.x * shade, color.y * shade, color.z * shade, 1))
+        }
+        // Subdivide each octahedron face once into 4 smooth facets (32 tris per puff).
+        for (a, b, c) in baseOcta {
+            let ab = simd_normalize((a + b) * 0.5)
+            let bc = simd_normalize((b + c) * 0.5)
+            let ca = simd_normalize((c + a) * 0.5)
+            emit(a, ab, ca)
+            emit(ab, b, bc)
+            emit(ca, bc, c)
+            emit(ab, bc, ca)
+        }
+    }
+
     /// Low-poly faceted alpine boulder.
     mutating func rock(center: V3, scale: V3, color: RGBA, rng: inout SeededRNG) {
         let top = center + V3(Float.random(in: -0.2...0.2, using: &rng) * scale.x,

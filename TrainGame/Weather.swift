@@ -293,23 +293,30 @@ final class WeatherFX {
 
         func buildCloudRing(count: Int, minR: Float, maxR: Float, minY: Float, maxY: Float) -> SCNNode {
             var mesh = MeshBuilder()
-            let up = V3(0, 1, 0), side = V3(1, 0, 0), fwd = V3(0, 0, 1)
             for i in 0..<count {
-                let a = Float(i) / Float(count) * 2 * .pi + Float.random(in: -0.25...0.25, using: &rng)
+                let a = Float(i) / Float(count) * 2 * .pi + Float.random(in: -0.22...0.22, using: &rng)
                 let r = Float.random(in: minR...maxR, using: &rng)
                 let y = Float.random(in: minY...maxY, using: &rng)
                 let center = V3(cos(a) * r, y, sin(a) * r)
-                let puffs = Int.random(in: 3...5, using: &rng)
+                let yaw = Float.random(in: 0..<(2 * .pi), using: &rng)
+                let dirX = V3(cos(yaw), 0, sin(yaw))
+                let dirZ = V3(-sin(yaw), 0, cos(yaw))
+
+                // Billowy cumulus cluster: wide soft base + taller domed center puffs + wispy ends.
+                let puffs = Int.random(in: 5...7, using: &rng)
                 for p in 0..<puffs {
-                    let ox = Float(p - puffs / 2) * Float.random(in: 24...38, using: &rng)
-                    let oy = Float.random(in: -6...12, using: &rng)
-                    let oz = Float.random(in: -18...18, using: &rng)
-                    let sx = Float.random(in: 24...44, using: &rng)
-                    let sy = Float.random(in: 10...19, using: &rng)
-                    let sz = Float.random(in: 20...36, using: &rng)
-                    let shade = Float.random(in: 0.92...1.0, using: &rng)
-                    mesh.box(center: center + V3(ox, oy, oz), side: side, up: up, forward: fwd,
-                             half: V3(sx, sy, sz), color: RGBA(shade, shade, shade, 1), includeBottom: true)
+                    let t = Float(p) / Float(max(1, puffs - 1)) * 2 - 1 // -1 ... +1 along cloud length
+                    let arch = max(0.35, 1.0 - t * t * 0.72)
+                    let along = t * Float.random(in: 48...74, using: &rng)
+                    let across = Float.random(in: -18...18, using: &rng)
+                    let lift = arch * Float.random(in: 8...22, using: &rng)
+                    let rx = Float.random(in: 28...46, using: &rng) * (0.65 + 0.45 * arch)
+                    let ry = Float.random(in: 14...25, using: &rng) * arch
+                    let rz = Float.random(in: 24...40, using: &rng) * (0.65 + 0.45 * arch)
+                    let shade = Float.random(in: 0.94...1.0, using: &rng)
+                    let puffPos = center + dirX * along + dirZ * across + V3(0, lift, 0)
+                    mesh.cloudPuff(center: puffPos, radius: V3(rx, ry, rz),
+                                   color: RGBA(shade, shade, shade, 1))
                 }
             }
             let ringNode = SCNNode(geometry: mesh.geometry(doubleSided: false, material: cloudMat))

@@ -75,10 +75,32 @@ final class Game: NSObject, SCNSceneRendererDelegate {
     private var track: Track
     private var terrain: Terrain
     private var train: Train
+    private let cabDashboard = CabDashboard()
     private let weatherFX: WeatherFX
     private let audio = TrainAudio()
     private let weatherService = WeatherService()
     private var stations: [Station] = []
+
+    // Animated Road Crossings (lowering arms + flashing red lights)
+    private struct RoadCrossing {
+        let distance: Float
+        let armLeft: SCNNode
+        let armRight: SCNNode
+        let lampMatA: SCNMaterial
+        let lampMatB: SCNMaterial
+        var gateClosed: Float = 0 // 0 = open (up), 1 = closed (horizontal)
+    }
+    private var crossings: [RoadCrossing] = []
+
+    // Kid-friendly 3-stage trackside station approach & stop signal posts
+    private struct ApproachSignals {
+        let stationIndex: Int
+        let distantAmberMat: SCNMaterial   // ~280m before station
+        let brakeRedMatA: SCNMaterial      // ~135m before station
+        let brakeRedMatB: SCNMaterial
+        let stopBeaconMat: SCNMaterial     // at 0m stop zone
+    }
+    private var approachSignals: [ApproachSignals] = []
 
     // Drive-through Train Wash animated rollers & soap spray
     private var washRollers: [SCNNode] = []
@@ -158,6 +180,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         camera.zFar = 9000
         camera.fieldOfView = 58
         cameraNode.camera = camera
+        cameraNode.addChildNode(cabDashboard.root)
         scene.rootNode.addChildNode(cameraNode)
 
         mountWorld()
@@ -174,6 +197,8 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         worldRoot.childNodes.forEach { $0.removeFromParentNode() }
         people.childNodes.forEach { $0.removeFromParentNode() }
         stations.removeAll()
+        crossings.removeAll()
+        approachSignals.removeAll()
         washRollers.removeAll()
         washSprays.removeAll()
 
@@ -196,11 +221,14 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         buildViaduct(material: sharedTrackMat)
         buildTunnel(material: sharedTrackMat)
         buildTrainWash()
+        buildRoadCrossings()
+        buildApproachSignals()
     }
 
     private func mountTrain() {
         trainRoot.childNodes.forEach { $0.removeFromParentNode() }
         for car in train.cars { trainRoot.addChildNode(car.node) }
+        cabDashboard.applyTheme(train.kind)
         if train.kind == .freight {
             if !cargoLoaded {
                 assignNextCargoMission(from: nextIndex)
@@ -585,6 +613,216 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         worldRoot.addChildNode(washNode)
     }
 
+    /// Builds 3 scenic road crossings with asphalt roadways, crossbucks, waiting cars,
+    /// alternating flashing red lights, and red-and-white barrier arms that lower as the train approaches.
+    private func buildRoadCrossings() {
+        func mat(_ c: PColor, emission: PColor? = nil) -> SCNMaterial {
+            let m = SCNMaterial()
+            m.lightingModel = .blinn
+            m.diffuse.contents = c
+            if let emission { m.emission.contents = emission }
+            return m
+        }
+
+        let asphalt = mat(rgb(0.22, 0.23, 0.26))
+        let white = mat(rgb(0.96, 0.96, 0.98))
+        let red = mat(rgb(0.86, 0.14, 0.12))
+        let yellow = mat(rgb(0.95, 0.76, 0.14))
+        let steel = mat(rgb(0.45, 0.47, 0.50))
+        let dark = mat(rgb(0.10, 0.10, 0.12))
+        let carColors: [PColor] = [rgb(0.85, 0.18, 0.16), rgb(0.16, 0.45, 0.86),
+                                   rgb(0.94, 0.74, 0.14), rgb(0.92, 0.94, 0.96),
+                                   rgb(0.18, 0.64, 0.42)]
+
+        let fractions: [Float] = [0.10, 0.29, 0.76]
+        for (idx, frac) in fractions.enumerated() {
+            let d = track.wrap(frac * track.length)
+            let f = track.frame(at: d)
+            let root = SCNNode()
+            root.simdTransform = makeTransform(side: f.side, up: f.up, forward: f.forward, position: f.position)
+
+            // Static road deck, dashed center lines, crossing posts, crossbucks & waiting cars
+            let staticGroup = SCNNode()
+            func addStatic(_ g: SCNGeometry, _ m: SCNMaterial, _ p: V3, euler: V3 = V3(0, 0, 0)) {
+                g.materials = [m]
+                let n = SCNNode(geometry: g)
+                n.simdPosition = p
+                n.simdEulerAngles = euler
+                staticGroup.addChildNode(n)
+            }
+
+            // Asphalt road perpendicular to track (extends ±42m laterally)
+            addStatic(SCNBox(width: 84, height: 0.22, length: 9.2, chamferRadius: 0), asphalt, V3(0, 0.04, 0))
+            // White stop bars & dashed lane markings
+            for x: Float in stride(from: -38, through: 38, by: 6.5) where abs(x) > 4.5 {
+                addStatic(SCNBox(width: 3.0, height: 0.04, length: 0.26, chamferRadius: 0), white, V3(x, 0.17, 0))
+            }
+            for xSign: Float in [-1, 1] {
+                addStatic(SCNBox(width: 0.45, height: 0.04, length: 4.0, chamferRadius: 0), white,
+                          V3(xSign * 6.8, 0.17, xSign * 2.1))
+            }
+
+            // Cute waiting low-poly cars stopped behind both lowered gates!
+            for (cSide, xSign) in [(0, Float(-1)), (1, Float(1))] {
+                let carCol = mat(carColors[(idx * 2 + cSide) % carColors.count])
+                let cx = xSign * 11.2
+                let cz = xSign * 2.2
+                addStatic(SCNBox(width: 4.2, height: 0.85, length: 2.0, chamferRadius: 0.12), carCol, V3(cx, 0.72, cz))
+                addStatic(SCNBox(width: 2.3, height: 0.68, length: 1.85, chamferRadius: 0.12), carCol, V3(cx + xSign * 0.25, 1.42, cz))
+                addStatic(SCNBox(width: 2.36, height: 0.48, length: 1.72, chamferRadius: 0.06), dark, V3(cx + xSign * 0.25, 1.42, cz))
+                for dx: Float in [-1.3, 1.3] {
+                    for dz: Float in [-0.95, 0.95] {
+                        let w = SCNCylinder(radius: 0.34, height: 0.22); w.radialSegmentCount = 10
+                        addStatic(w, dark, V3(cx + dx, 0.36, cz + dz), euler: V3(.pi / 2, 0, 0))
+                    }
+                }
+            }
+
+            // Gate pedestals, vertical posts & iconic X-shaped crossbucks on both sides of the track
+            let lampMatA = mat(rgb(0.32, 0.05, 0.05))
+            let lampMatB = mat(rgb(0.32, 0.05, 0.05))
+
+            func buildGateArm(sideSign: Float) -> SCNNode {
+                // Pivot sits right on the gate pedestal; rotates around local X to lower across the road (along Z)!
+                let pivot = SCNNode()
+                pivot.simdPosition = V3(sideSign * 4.4, 1.45, sideSign * 4.8)
+                let armGroup = SCNNode()
+                // Red & white striped barrier arm extending across the roadway (-sideSign * Z direction)
+                let segCount = 6
+                let segLen: Float = 1.45
+                for s in 0..<segCount {
+                    let g = SCNBox(width: 0.12, height: 0.18, length: CGFloat(segLen), chamferRadius: 0.02)
+                    g.materials = [s % 2 == 0 ? red : white]
+                    let n = SCNNode(geometry: g)
+                    n.simdPosition = V3(0, 0, -sideSign * (Float(s) + 0.5) * segLen)
+                    armGroup.addChildNode(n)
+                }
+                // Yellow counterweight behind pivot
+                let cw = SCNBox(width: 0.22, height: 0.34, length: 1.1, chamferRadius: 0.03)
+                cw.materials = [yellow]
+                let cwn = SCNNode(geometry: cw)
+                cwn.simdPosition = V3(0, 0, sideSign * 0.75)
+                armGroup.addChildNode(cwn)
+
+                pivot.addChildNode(armGroup.flattenedClone())
+                return pivot
+            }
+
+            for sideSign: Float in [-1, 1] {
+                let px = sideSign * 4.4, pz = sideSign * 4.8
+                addStatic(SCNBox(width: 0.55, height: 1.5, length: 0.55, chamferRadius: 0.04), yellow, V3(px, 0.75, pz))
+                let pole = SCNCylinder(radius: 0.10, height: 4.8); pole.radialSegmentCount = 10
+                addStatic(pole, steel, V3(px, 2.5, pz))
+                // X-shaped crossbuck blades
+                addStatic(SCNBox(width: 0.08, height: 0.24, length: 1.85, chamferRadius: 0), white,
+                          V3(px - sideSign * 0.12, 4.35, pz), euler: V3(0.62, 0, 0))
+                addStatic(SCNBox(width: 0.08, height: 0.24, length: 1.85, chamferRadius: 0), white,
+                          V3(px - sideSign * 0.12, 4.35, pz), euler: V3(-0.62, 0, 0))
+                // Horizontal twin-lamp light bar
+                addStatic(SCNBox(width: 0.16, height: 0.16, length: 1.35, chamferRadius: 0), dark, V3(px, 3.25, pz))
+
+                // Alternating flashing red signal lamps (visible from road AND approaching train!)
+                for (lIdx, dz) in [(0, Float(-0.48)), (1, Float(0.48))] {
+                    let lamp = SCNSphere(radius: 0.22); lamp.segmentCount = 10
+                    lamp.materials = [lIdx == 0 ? lampMatA : lampMatB]
+                    let ln = SCNNode(geometry: lamp)
+                    ln.simdPosition = V3(px, 3.25, pz + dz)
+                    ln.castsShadow = false
+                    root.addChildNode(ln)
+                }
+            }
+
+            root.addChildNode(staticGroup.flattenedClone())
+
+            let armL = buildGateArm(sideSign: -1)
+            let armR = buildGateArm(sideSign: 1)
+            // Start open (raised upright)
+            armL.simdEulerAngles = V3(-1.35, 0, 0)
+            armR.simdEulerAngles = V3(1.35, 0, 0)
+            root.addChildNode(armL)
+            root.addChildNode(armR)
+
+            worldRoot.addChildNode(root)
+            crossings.append(RoadCrossing(distance: d, armLeft: armL, armRight: armR,
+                                          lampMatA: lampMatA, lampMatB: lampMatB))
+        }
+    }
+
+    /// Builds kid-friendly 3-stage trackside signal posts leading into every station:
+    /// 1) 280m out: Glowing AMBER "Slow Down" post
+    /// 2) 135m out: Twin flashing RED "Brake Now!" post
+    /// 3) 0m stop marker: Big glowing RED/GREEN "Stop Here" beacon
+    private func buildApproachSignals() {
+        func mat(_ c: PColor) -> SCNMaterial {
+            let m = SCNMaterial()
+            m.lightingModel = .blinn
+            m.diffuse.contents = c
+            return m
+        }
+
+        let darkIron = mat(rgb(0.16, 0.17, 0.20))
+        let yellowBoard = mat(rgb(0.95, 0.78, 0.14))
+        let redBoard = mat(rgb(0.88, 0.16, 0.14))
+        let whiteStripe = mat(rgb(0.96, 0.96, 0.98))
+
+        func makePost(at trackD: Float, lateral: Float, boardColor: SCNMaterial,
+                      lampMats: [SCNMaterial], bigBeacon: Bool = false) {
+            let f = track.frame(at: track.wrap(trackD))
+            let post = SCNNode()
+            post.simdTransform = makeTransform(side: f.side, up: f.up, forward: f.forward,
+                                               position: f.position + f.side * lateral)
+
+            let body = SCNNode()
+            func add(_ g: SCNGeometry, _ m: SCNMaterial, _ p: V3) {
+                g.materials = [m]
+                let n = SCNNode(geometry: g); n.simdPosition = p
+                body.addChildNode(n)
+            }
+
+            let h: Float = bigBeacon ? 6.4 : 5.6
+            add(SCNBox(width: 0.22, height: CGFloat(h), length: 0.22, chamferRadius: 0), darkIron, V3(0, h * 0.5, 0))
+            // High-contrast striped sign board facing the approaching train (-forward)
+            add(SCNBox(width: 1.05, height: 1.9, length: 0.16, chamferRadius: 0.04), boardColor, V3(0, h - 1.15, 0))
+            add(SCNBox(width: 1.08, height: 0.24, length: 0.18, chamferRadius: 0), whiteStripe, V3(0, h - 1.95, 0))
+            // Dark lamp housing hood
+            add(SCNBox(width: 0.85, height: CGFloat(lampMats.count == 2 ? 1.55 : 0.95), length: 0.36, chamferRadius: 0.04),
+                darkIron, V3(0, h + 0.35, -0.05))
+            post.addChildNode(body.flattenedClone())
+
+            let lampRadius: CGFloat = bigBeacon ? 0.34 : 0.27
+            for (i, lMat) in lampMats.enumerated() {
+                let yOff: Float = lampMats.count == 2 ? (i == 0 ? 0.72 : 0.02) : 0.35
+                let bulb = SCNSphere(radius: lampRadius); bulb.segmentCount = 12
+                bulb.materials = [lMat]
+                let bn = SCNNode(geometry: bulb)
+                bn.simdPosition = V3(0, h + yOff, -0.22)
+                bn.castsShadow = false
+                post.addChildNode(bn)
+            }
+            worldRoot.addChildNode(post)
+        }
+
+        for (i, station) in stations.enumerated() {
+            let distantAmber = mat(rgb(0.35, 0.24, 0.04))
+            let brakeRedA = mat(rgb(0.35, 0.05, 0.05))
+            let brakeRedB = mat(rgb(0.35, 0.05, 0.05))
+            let stopBeacon = mat(rgb(0.35, 0.05, 0.05))
+
+            // Place on the left side (-3.2m) so they stand out cleanly in Chase & Cab views!
+            makePost(at: station.distance - 280, lateral: -3.2, boardColor: yellowBoard, lampMats: [distantAmber])
+            makePost(at: station.distance - 135, lateral: -3.2, boardColor: redBoard, lampMats: [brakeRedA, brakeRedB])
+            makePost(at: station.distance, lateral: -3.1, boardColor: redBoard, lampMats: [stopBeacon], bigBeacon: true)
+
+            approachSignals.append(ApproachSignals(
+                stationIndex: i,
+                distantAmberMat: distantAmber,
+                brakeRedMatA: brakeRedA,
+                brakeRedMatB: brakeRedB,
+                stopBeaconMat: stopBeacon
+            ))
+        }
+    }
+
     // MARK: Lifecycle & Debug
 
     func start(muted: Bool = false, liveWeather: Bool = true) {
@@ -651,6 +889,8 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         let washAmt = max(track.washFactor(at: head),
                           max(track.washFactor(at: head - 30), track.washFactor(at: head - 62)))
         updateTrainWash(dt: dt, washAmt: washAmt)
+        let crossingBellAmt = updateRoadCrossings(dt: dt)
+        let cabSignalState = updateApproachSignals()
 
         updateCamera(dt: dt)
 
@@ -672,6 +912,13 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         train.updateEffects(power: power, speed: speed, hornOn: commands.horn,
                             nightLevel: weatherFX.nightLevel, tunnelFactor: tunnelAmt,
                             fogFactor: weatherFX.fogLevel, time: time)
+        cabDashboard.root.isHidden = cameraMode != .cab
+        if cameraMode == .cab {
+            let lampOn = max(weatherFX.nightLevel, max(tunnelAmt, weatherFX.fogLevel * 0.65)) > 0.25
+            cabDashboard.update(dt: dt, speedNorm: speed / train.kind.maxSpeed, notch: notch,
+                                hornOn: commands.horn, headlightOn: lampOn,
+                                signalState: cabSignalState, time: time)
+        }
         terrain.update(time: time, nightLevel: weatherFX.nightLevel, skyHorizon: weatherFX.currentSkyHorizon)
         for station in stations {
             station.setNightGlow(max(weatherFX.nightLevel, weatherFX.fogLevel * 0.45))
@@ -680,7 +927,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         audio.update(speed: speed, power: power, brake: brake, hornOn: commands.horn,
                      rain: weatherFX.rainLevel, wind: weatherFX.windLevel,
                      night: weatherFX.nightLevel, viaduct: viaductAmt,
-                     tunnel: tunnelAmt, wash: washAmt,
+                     tunnel: tunnelAmt, wash: washAmt, crossingBell: crossingBellAmt,
                      trainKind: train.kind, isUrban: theme == .tokyo)
 
         publishHUD(dt: dt, mode: mode, kind: kind, timeMode: timeMode, live: live)
@@ -767,6 +1014,102 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             confettiTrigger += 1
             flash("Sparkling clean! ✨", seconds: 3.0)
         }
+    }
+
+    /// Lowers crossing gates and flashes alternating red warning lamps as the train nears a road crossing.
+    /// Returns 0...1 proximity intensity for the railroad crossing bell sound.
+    private func updateRoadCrossings(dt: Float) -> Float {
+        var maxBell: Float = 0
+        let flashA = sin(time * 9.0) > 0
+        for i in 0..<crossings.count {
+            let delta = track.signedDelta(from: head, to: crossings[i].distance)
+            let active = delta < 210 && delta > -(Train.totalLength + 25)
+            let targetClosed: Float = active ? 1.0 : 0.0
+            let rate: Float = active ? 1.25 : 0.9
+            if crossings[i].gateClosed < targetClosed {
+                crossings[i].gateClosed = min(targetClosed, crossings[i].gateClosed + rate * dt)
+            } else if crossings[i].gateClosed > targetClosed {
+                crossings[i].gateClosed = max(targetClosed, crossings[i].gateClosed - rate * dt)
+            }
+
+            let openAngle: Float = 1.35 * (1 - crossings[i].gateClosed)
+            crossings[i].armLeft.simdEulerAngles = V3(-openAngle, 0, 0)
+            crossings[i].armRight.simdEulerAngles = V3(openAngle, 0, 0)
+
+            let lampsOn = active || crossings[i].gateClosed > 0.08
+            if lampsOn {
+                crossings[i].lampMatA.emission.contents = flashA ? rgb(1.0, 0.08, 0.06) : rgb(0.06, 0.01, 0.01)
+                crossings[i].lampMatA.diffuse.contents = flashA ? rgb(1.0, 0.22, 0.18) : rgb(0.32, 0.06, 0.06)
+                crossings[i].lampMatB.emission.contents = !flashA ? rgb(1.0, 0.08, 0.06) : rgb(0.06, 0.01, 0.01)
+                crossings[i].lampMatB.diffuse.contents = !flashA ? rgb(1.0, 0.22, 0.18) : rgb(0.32, 0.06, 0.06)
+                let dist = abs(delta)
+                let prox = clamp(1 - dist / 190, 0, 1)
+                maxBell = max(maxBell, prox)
+            } else {
+                crossings[i].lampMatA.emission.contents = rgb(0, 0, 0)
+                crossings[i].lampMatB.emission.contents = rgb(0, 0, 0)
+            }
+        }
+        return maxBell
+    }
+
+    /// Updates the 3-stage kid-friendly trackside station approach & stop lights.
+    /// Returns cab signal state: 0 = clear, 1 = caution amber, 2 = brake/stop red, 3 = go green.
+    private func updateApproachSignals() -> Int {
+        var cabSignal = 0
+        let pulse = 0.45 + 0.55 * abs(sin(time * 6.5))
+        let alt = sin(time * 9.5) > 0
+
+        for sig in approachSignals {
+            let isTarget = sig.stationIndex == nextIndex
+            let station = stations[sig.stationIndex]
+            let delta = track.signedDelta(from: head, to: station.distance)
+
+            if isTarget && dwellUntil == nil && delta > -Station.stopPast && delta < 440 {
+                // Stage 1: Distant Amber warning post (280m)
+                let amberActive = delta > 120
+                sig.distantAmberMat.emission.contents = amberActive ? rgb(1.0 * pulse, 0.68 * pulse, 0.06) : rgb(0.35, 0.22, 0.02)
+                sig.distantAmberMat.diffuse.contents = amberActive ? rgb(1.0, 0.78, 0.16) : rgb(0.50, 0.36, 0.08)
+
+                // Stage 2: Twin flashing RED "Brake Now!" post (135m)
+                let brakeActive = delta < 220 && speed > 1.5
+                sig.brakeRedMatA.emission.contents = brakeActive && alt ? rgb(1.0, 0.08, 0.06) : rgb(0.18, 0.02, 0.02)
+                sig.brakeRedMatA.diffuse.contents = brakeActive && alt ? rgb(1.0, 0.22, 0.18) : rgb(0.45, 0.08, 0.08)
+                sig.brakeRedMatB.emission.contents = brakeActive && !alt ? rgb(1.0, 0.08, 0.06) : rgb(0.18, 0.02, 0.02)
+                sig.brakeRedMatB.diffuse.contents = brakeActive && !alt ? rgb(1.0, 0.22, 0.18) : rgb(0.45, 0.08, 0.08)
+
+                // Stage 3: Big Stop Beacon at the platform (RED while moving/approaching, GREEN when stopped in zone!)
+                let inStop = delta <= Station.stopShort && delta >= -Station.stopPast
+                if inStop && speed < 3.5 {
+                    sig.stopBeaconMat.emission.contents = rgb(0.16, 1.0, 0.36)
+                    sig.stopBeaconMat.diffuse.contents = rgb(0.24, 1.0, 0.46)
+                } else {
+                    sig.stopBeaconMat.emission.contents = rgb(1.0 * pulse, 0.08 * pulse, 0.06)
+                    sig.stopBeaconMat.diffuse.contents = rgb(1.0, 0.20, 0.16)
+                }
+
+                if delta < 150 && speed > 0.5 {
+                    cabSignal = 2 // Flashing red: Brake / Stop!
+                } else if delta < 320 && speed > 4.0 {
+                    cabSignal = 1 // Amber: Slow down!
+                }
+            } else if dwellUntil != nil && isTarget {
+                sig.distantAmberMat.emission.contents = rgb(0.08, 0.05, 0.01)
+                sig.brakeRedMatA.emission.contents = rgb(0.08, 0.01, 0.01)
+                sig.brakeRedMatB.emission.contents = rgb(0.08, 0.01, 0.01)
+                sig.stopBeaconMat.emission.contents = rgb(0.16, 1.0, 0.36)
+                sig.stopBeaconMat.diffuse.contents = rgb(0.24, 1.0, 0.46)
+                cabSignal = 3
+            } else {
+                // Idle green/soft glow on non-active stations
+                sig.distantAmberMat.emission.contents = rgb(0.08, 0.05, 0.01)
+                sig.brakeRedMatA.emission.contents = rgb(0.08, 0.01, 0.01)
+                sig.brakeRedMatB.emission.contents = rgb(0.08, 0.01, 0.01)
+                sig.stopBeaconMat.emission.contents = rgb(0.12, 0.65, 0.24)
+                sig.stopBeaconMat.diffuse.contents = rgb(0.18, 0.72, 0.30)
+            }
+        }
+        return cabSignal
     }
 
     private func flashWeatherBanner() {
@@ -895,13 +1238,13 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             if tunnelBlend > 0.12 { clampToTerrain = false }
 
         case .cab:
-            let cab = track.frame(at: head - (train.kind == .bullet ? 4.5 : 7.0))
-            let sway = sin(odometer * 0.38) * 0.03 * min(speed / 12, 1)
-            let cabLat: Float = train.kind == .bullet ? 0.0 : 1.75
-            let cabH: Float = train.kind == .bullet ? 2.8 : 3.0
-            position = cab.position + cab.side * (cabLat + sway) + cab.up * (Train.railTop + cabH)
-            target = position + cab.forward * 65 - up * 3.5
-            if track.isInTunnel(head - 7.0, margin: 12) { clampToTerrain = false }
+            // Seated right inside the front cab looking cleanly out over the animated 3D dashboard!
+            let cab = track.frame(at: head - (train.kind == .bullet ? 3.5 : 4.2))
+            let sway = sin(odometer * 0.38) * 0.025 * min(speed / 12, 1)
+            let cabH: Float = train.kind == .bullet ? 2.95 : 3.35
+            position = cab.position + cab.side * sway + cab.up * (Train.railTop + cabH)
+            target = position + cab.forward * 65 - up * 2.4
+            if track.isInTunnel(head - 4.0, margin: 12) { clampToTerrain = false }
 
         case .side:
             position = middle.position - middle.side * 44 + up * 7
@@ -1009,9 +1352,11 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         } else if dwellUntil != nil {
             state.banner = train.kind == .freight ? "\(station.name) · loading cargo" : "\(station.name) · doors open"
         } else if delta <= Station.stopShort && speed > 0.05 {
-            state.banner = "Stop here"
-        } else if delta < (train.kind == .bullet ? 520 : 350) && speed > 6 {
-            state.banner = "Approaching \(station.name), brake now"
+            state.banner = "🟢 Stop here!"
+        } else if delta < 145 && speed > 3.5 {
+            state.banner = "🔴 Brake now for \(station.name)!"
+        } else if delta < (train.kind == .bullet ? 480 : 320) && speed > 6 {
+            state.banner = "🟡 Slow down for \(station.name)"
         }
 
         guard state != lastPublished else { return }
