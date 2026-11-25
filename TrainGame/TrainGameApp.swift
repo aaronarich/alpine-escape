@@ -144,7 +144,8 @@ final class SnapshotRun {
     }
 
     func begin() {
-        var t = 1.4
+        NSApp.activate(ignoringOtherApps: true)
+        var t = 1.6
         func at(_ delay: Double, _ work: @escaping () -> Void) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
@@ -152,23 +153,23 @@ final class SnapshotRun {
             at(t, setup)
             t += wait
             at(t) { self.save(name) }
-            t += 0.2
+            t += 0.25
         }
-        shot("01-alps-freight-wash", after: 1.2) {
+        shot("cab-view", after: 1.5) {
+            self.game.debugSet(world: .alps, train: .steam, camera: .cab,
+                               weather: .rain, timeOfDay: .manual(.morning), notch: 3, headFraction: 0.075)
+        }
+        shot("cargo-freight", after: 1.4) {
             self.game.debugSet(world: .alps, train: .freight, camera: .chase,
-                               weather: .clear, timeOfDay: .manual(.morning), notch: 2, headFraction: 0.842)
+                               weather: .clear, timeOfDay: .manual(.morning), notch: 3, headFraction: 0.832)
         }
-        shot("02-tokyo-bullet-day", after: 1.4) {
+        shot("tokyo-bullet", after: 1.6) {
             self.game.debugSet(world: .tokyo, train: .bullet, camera: .chase,
                                weather: .clear, timeOfDay: .manual(.midday), notch: 4, headFraction: 0.19)
         }
-        shot("03-tokyo-bullet-night", after: 1.4) {
+        shot("tokyo-night", after: 1.4) {
             self.game.debugSet(world: .tokyo, train: .bullet, camera: .chase,
                                weather: .clear, timeOfDay: .manual(.night), notch: 3, headFraction: 0.04)
-        }
-        shot("04-tokyo-tower-aerial", after: 1.2) {
-            self.game.debugSet(world: .tokyo, train: .bullet, camera: .aerial,
-                               weather: .clear, timeOfDay: .manual(.sunset), notch: 3, headFraction: 0.36)
         }
         at(t + 0.4) { exit(0) }
     }

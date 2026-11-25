@@ -23,15 +23,27 @@ Every mountain, chalet, stone viaduct arch, snowflake, and steam whistle echo is
 - **Real-Time Procedural Stereo Audio**: Distinct resonant engines (punchy Steam *chugga-chugga*, rising Japanese Shinkansen VVVF electric inverter hum, deep Freight diesel-electric thrum), train-specific horns with stereo valley/tunnel echo, 4-hit metallic bogie clickety-clack, Swiss station bell & Tokyo Hassha departure melody, Train Wash spray & bubbles, daytime songbirds, night crickets, raindrops, and rolling thunder.
 - **Built for 60 fps on Apple TV 4K & Mac**: 6×6 spatially chunked terrain/scenery and 16-chunk track meshes for aggressive frustum & shadow culling, compact 36-byte interleaved indexless vertex buffers, batched wheel axles, shared low-poly passenger geometries, and lock-free audio parameter snapshots.
 
-## Gallery
+## Interactive 3D Cab View
+
+Switch to **Cab** camera (`◀` on Apple TV, `C` on Mac) to drive from behind a live 3D cockpit console with an animated speedometer, power/pressure dial, moving throttle/brake lever, illuminated status lamps, toggle switches, and automatic windshield wipers in rain and snow:
+
+![Interactive 3D Cab View with gauges, lever, switches, and automatic windshield wipers](docs/cab-view.png)
+
+## Train Fleet
+
+| Steam Express *(Swiss Alps Viaduct)* | Shinkansen Bullet *(Tokyo Bay Viaduct)* | Cargo Freight *(Approaching Train Wash)* |
+| :---: | :---: | :---: |
+| ![Steam Express](docs/viaduct.png) | ![Shinkansen Bullet](docs/tokyo-bullet.png) | ![Cargo Freight](docs/cargo-freight.png) |
+
+## Worlds & Lighting Gallery
 
 | Morning at Grindelwald | Golden Hour on the Viaduct |
 | :---: | :---: |
 | ![Grindelwald Station](docs/station-morning.png) | ![Sunset Viaduct](docs/sunset-viaduct.png) |
 
-| Alpine Night at Kandersteg | Snowy Night Cab View |
+| Alpine Night at Kandersteg | Tokyo Skyline at Night |
 | :---: | :---: |
-| ![Alpine Night Station](docs/alpine-night.png) | ![Night Cab View in Snow](docs/night-cab-snow.png) |
+| ![Alpine Night Station](docs/alpine-night.png) | ![Tokyo Night](docs/tokyo-night.png) |
 
 ## Controls
 
