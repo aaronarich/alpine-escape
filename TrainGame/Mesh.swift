@@ -289,6 +289,53 @@ struct MeshBuilder {
         }
     }
 
+    /// Cute low-poly grazing Swiss alpine cow (white body, dark spots, head & legs).
+    mutating func cow(base: V3, yaw: Float, brown: Bool) {
+        let fwd = V3(sin(yaw), 0, cos(yaw))
+        let side = V3(cos(yaw), 0, -sin(yaw))
+        let up = V3(0, 1, 0)
+        let coat = brown ? RGBA(0.54, 0.34, 0.18, 1) : RGBA(0.95, 0.94, 0.91, 1)
+        let spot = brown ? RGBA(0.95, 0.94, 0.91, 1) : RGBA(0.14, 0.13, 0.13, 1)
+        let nose = RGBA(0.86, 0.64, 0.60, 1)
+
+        // Torso & spot patch
+        box(center: base + up * 1.05, side: side, up: up, forward: fwd, half: V3(0.44, 0.42, 0.88), color: coat, includeBottom: false)
+        box(center: base + up * 1.12 + fwd * 0.15, side: side, up: up, forward: fwd, half: V3(0.46, 0.26, 0.38), color: spot, includeBottom: false)
+        // Head & muzzle
+        box(center: base + up * 1.18 + fwd * 1.05, side: side, up: up, forward: fwd, half: V3(0.26, 0.26, 0.30), color: coat, includeBottom: false)
+        box(center: base + up * 1.08 + fwd * 1.32, side: side, up: up, forward: fwd, half: V3(0.22, 0.16, 0.12), color: nose, includeBottom: false)
+        // 4 legs
+        for sx: Float in [-0.28, 0.28] {
+            for sz: Float in [-0.62, 0.62] {
+                box(center: base + side * sx + up * 0.38 + fwd * sz, side: side, up: up, forward: fwd,
+                    half: V3(0.10, 0.38, 0.10), color: coat, includeBottom: false)
+            }
+        }
+    }
+
+    /// Iconic red Japanese Torii shrine gate for Tokyo's sakura parks!
+    mutating func toriiGate(base: V3, yaw: Float, scale: Float = 1.0) {
+        let fwd = V3(sin(yaw), 0, cos(yaw))
+        let side = V3(cos(yaw), 0, -sin(yaw))
+        let up = V3(0, 1, 0)
+        let vermilion = RGBA(0.88, 0.18, 0.12, 1)
+        let darkCap = RGBA(0.14, 0.14, 0.16, 1)
+
+        for sx: Float in [-2.6, 2.6] {
+            box(center: base + side * (sx * scale) + up * (3.2 * scale), side: side, up: up, forward: fwd,
+                half: V3(0.32 * scale, 3.4 * scale, 0.32 * scale), color: vermilion, includeBottom: false)
+            box(center: base + side * (sx * scale) + up * (0.5 * scale), side: side, up: up, forward: fwd,
+                half: V3(0.44 * scale, 0.6 * scale, 0.44 * scale), color: darkCap, includeBottom: false)
+        }
+        // Lower tie beam (nuki) & upper curved lintel (kasagi)
+        box(center: base + up * (4.9 * scale), side: side, up: up, forward: fwd,
+            half: V3(3.4 * scale, 0.24 * scale, 0.24 * scale), color: vermilion, includeBottom: false)
+        box(center: base + up * (6.2 * scale), side: side, up: up, forward: fwd,
+            half: V3(4.1 * scale, 0.34 * scale, 0.40 * scale), color: vermilion, includeBottom: false)
+        box(center: base + up * (6.58 * scale), side: side, up: up, forward: fwd,
+            half: V3(4.25 * scale, 0.16 * scale, 0.46 * scale), color: darkCap, includeBottom: false)
+    }
+
     /// Sweeps a 2D profile (x = sideways, y = up) along the track with outward-facing normals.
     /// Set `flip = true` to invert normals inward (e.g. for a tunnel interior lining).
     mutating func ribbon(track: Track, from: Float, to: Float, step: Float,

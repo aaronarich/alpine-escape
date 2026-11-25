@@ -429,6 +429,70 @@ final class Terrain {
             rocksPlaced += 1
         }
 
+        // Grazing Swiss alpine cows & rustic wooden pasture fences in flat meadows near the rails!
+        var cowsPlaced = 0, cowAttempts = 0
+        let fenceWood = RGBA(0.44, 0.29, 0.16, 1)
+        while cowsPlaced < 44 && cowAttempts < 700 {
+            cowAttempts += 1
+            let f = track.frame(at: Float.random(in: 0..<track.length, using: &rng))
+            let lateral = Float.random(in: 18...78, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+            let x = f.position.x + f.side.x * lateral
+            let z = f.position.z + f.side.z * lateral
+            guard abs(x) < size * 0.45, abs(z) < size * 0.45 else { continue }
+            let h = height(x: x, z: z)
+            guard h > Terrain.waterLevel + 4.0, h < 95 else { continue }
+            guard abs(height(x: x + 4, z: z) - h) < 1.8, abs(height(x: x, z: z + 4) - h) < 1.8 else { continue }
+            let near = track.nearest(x: x, z: z)
+            guard near.distance > 16 else { continue }
+            if near.distance < 34 && stationDistances.contains(where: { abs(track.signedDelta(from: near.along, to: $0 - 43)) < 58 }) { continue }
+
+            let idx = chunkIndex(x: x, z: z)
+            let yaw = Float.random(in: 0..<(2 * .pi), using: &rng)
+            chunks[idx].cow(base: V3(x, h, z), yaw: yaw, brown: Bool.random(using: &rng))
+
+            // Add a short rustic wooden fence rail beside every third cow cluster
+            if cowsPlaced % 3 == 0 {
+                let ffwd = V3(f.forward.x, 0, f.forward.z)
+                let fNorm = simd_length(ffwd) > 0.01 ? simd_normalize(ffwd) : V3(0, 0, 1)
+                let fSide = simd_cross(V3(0, 1, 0), fNorm)
+                let fenceBase = V3(x, h, z) - f.side * (lateral > 0 ? 5.5 : -5.5)
+                for p: Float in [-4.5, 0, 4.5] {
+                    chunks[idx].box(center: fenceBase + fNorm * p + V3(0, 0.55, 0),
+                                    side: fSide, up: V3(0, 1, 0), forward: fNorm,
+                                    half: V3(0.09, 0.65, 0.09), color: fenceWood, includeBottom: false)
+                }
+                for ry: Float in [0.42, 0.88] {
+                    chunks[idx].box(center: fenceBase + V3(0, ry, 0),
+                                    side: fSide, up: V3(0, 1, 0), forward: fNorm,
+                                    half: V3(0.06, 0.07, 4.7), color: fenceWood, includeBottom: false)
+                }
+            }
+            cowsPlaced += 1
+        }
+
+        // Colorful alpine wildflower tufts dotting sunny green meadows near the tracks
+        let flowerColors: [RGBA] = [
+            RGBA(0.98, 0.84, 0.14, 1), // yellow buttercup
+            RGBA(0.98, 0.98, 0.96, 1), // white edelweiss
+            RGBA(0.58, 0.36, 0.94, 1), // alpine violet
+            RGBA(0.96, 0.44, 0.64, 1), // alpine rose
+        ]
+        let up = V3(0, 1, 0), sAxis = V3(1, 0, 0), fAxis = V3(0, 0, 1)
+        for _ in 0..<420 {
+            let f = track.frame(at: Float.random(in: 0..<track.length, using: &rng))
+            let lateral = Float.random(in: 10...58, using: &rng) * (Bool.random(using: &rng) ? 1 : -1)
+            let x = f.position.x + f.side.x * lateral
+            let z = f.position.z + f.side.z * lateral
+            guard abs(x) < size * 0.46, abs(z) < size * 0.46 else { continue }
+            let h = height(x: x, z: z)
+            guard h > Terrain.waterLevel + 3.0, h < 110 else { continue }
+            let near = track.nearest(x: x, z: z)
+            guard near.distance > 9.5 else { continue }
+            let col = flowerColors.randomElement(using: &rng)!
+            chunks[chunkIndex(x: x, z: z)].box(center: V3(x, h + 0.16, z), side: sAxis, up: up, forward: fAxis,
+                                               half: V3(0.32, 0.18, 0.32), color: col, includeBottom: false)
+        }
+
         finalizeSceneryChunks(chunks: chunks, windows: chaletWindows, neon: MeshBuilder())
     }
 
@@ -539,9 +603,35 @@ final class Terrain {
                 neonSigns.box(center: V3(x, signY, z) + fwd * (hl * 0.75), side: side, up: up, forward: fwd,
                               half: V3(hw * 0.72, 2.2, 0.35), color: nCol)
             }
+            // Glowing red rooftop aviation beacon on tall skyscrapers
+            if towerH > 72 {
+                neonSigns.box(center: V3(x, h + towerH + 22, z), side: side, up: up, forward: fwd,
+                              half: V3(0.85, 0.85, 0.85), color: RGBA(1.0, 0.16, 0.12, 1))
+            }
 
             placedTowers.append((x, z, radius))
             count += 1
+        }
+
+        // Iconic red Japanese Torii gates framing the Tokyo Tower park & station approaches!
+        for k in 0..<6 {
+            let angle = Float(k) / 6.0 * 2 * .pi + 0.3
+            let tx = cos(angle) * 62
+            let tz = sin(angle) * 62
+            let th = height(x: tx, z: tz)
+            if th > Terrain.waterLevel + 1.5 {
+                chunks[chunkIndex(x: tx, z: tz)].toriiGate(base: V3(tx, th, tz), yaw: angle + .pi / 2, scale: 1.15)
+            }
+        }
+        for sd in stationDistances {
+            let f = track.frame(at: track.wrap(sd - 110))
+            let tx = f.position.x - f.side.x * 20
+            let tz = f.position.z - f.side.z * 20
+            let th = height(x: tx, z: tz)
+            if th > Terrain.waterLevel + 2.0 {
+                let yaw = atan2(f.side.x, f.side.z)
+                chunks[chunkIndex(x: tx, z: tz)].toriiGate(base: V3(tx, th, tz), yaw: yaw, scale: 1.0)
+            }
         }
 
         // 2. Scatter pink Sakura cherry blossom trees & urban park greens around stations, parks, and Tokyo Tower!

@@ -670,7 +670,12 @@ final class CabDashboard {
     private let brakeLampMat = SCNMaterial()
     private let headlightLampMat = SCNMaterial()
     private let signalLampMat = SCNMaterial()
-    private let switchToggleNodes: [SCNNode] = []
+    private let wiperLampMat = SCNMaterial()
+
+    private let wiperLeftPivot = SCNNode()
+    private let wiperRightPivot = SCNNode()
+    private var wiperPhase: Float = 0
+    private var wiperAngle: Float = 0
 
     private var smoothSpeedNeedle: Float = 0
     private var smoothPowerNeedle: Float = 0
@@ -699,10 +704,10 @@ final class CabDashboard {
         }
     }
 
-    /// Updates all live 3D gauges, levers, and indicator lamps each frame.
+    /// Updates all live 3D gauges, levers, automatic windshield wipers, and indicator lamps each frame.
     /// `signalState`: 0 = clear/off, 1 = caution amber, 2 = brake/stop red, 3 = go green.
     func update(dt: Float, speedNorm: Float, notch: Int, hornOn: Bool,
-                headlightOn: Bool, signalState: Int, time: Float) {
+                headlightOn: Bool, signalState: Int, precipLevel: Float, time: Float) {
         let k = 1 - exp(-dt * 9.0)
 
         // Speedometer needle: sweeps from +2.15 rad (left, 0 km/h) to -2.15 rad (right, max speed).
@@ -717,9 +722,24 @@ final class CabDashboard {
         powerNeedlePivot.simdEulerAngles = V3(0, 0, smoothPowerNeedle)
 
         // Physical throttle/brake lever tilts forward (+notch) or pulls back (-notch).
-        let targetLever = Float(notch) * -0.14
+        let targetLever = Float(notch) * -0.15
         smoothLeverAngle += (targetLever - smoothLeverAngle) * k
         throttleLeverPivot.simdEulerAngles = V3(smoothLeverAngle, 0, 0)
+
+        // Automatic windshield wipers in rain or snow!
+        let wipersActive = precipLevel > 0.04
+        if wipersActive {
+            let sweepRate: Float = 2.6 + min(precipLevel, 1.5) * 1.4
+            wiperPhase += sweepRate * dt
+            let sweep = 0.5 - 0.5 * cos(wiperPhase) // smooth 0...1...0 arc
+            wiperAngle = lerp(-1.28, 0.18, sweep)
+        } else {
+            // Smoothly park wipers flat along the lower windshield sill
+            wiperAngle += (-1.28 - wiperAngle) * (1 - exp(-dt * 6.0))
+            if abs(wiperAngle + 1.28) < 0.01 { wiperPhase = 0 }
+        }
+        wiperLeftPivot.simdEulerAngles = V3(0, 0, wiperAngle)
+        wiperRightPivot.simdEulerAngles = V3(0, 0, wiperAngle)
 
         // Indicator lamps
         hornLampMat.emission.contents = hornOn ? rgb(1.0, 0.78, 0.12) : rgb(0.08, 0.06, 0.02)
@@ -732,15 +752,18 @@ final class CabDashboard {
         headlightLampMat.emission.contents = headlightOn ? rgb(0.35, 0.88, 1.0) : rgb(0.03, 0.08, 0.10)
         headlightLampMat.diffuse.contents = headlightOn ? rgb(0.55, 0.94, 1.0) : rgb(0.14, 0.22, 0.26)
 
+        wiperLampMat.emission.contents = wipersActive ? rgb(0.24, 0.72, 1.0) : rgb(0.02, 0.05, 0.08)
+        wiperLampMat.diffuse.contents = wipersActive ? rgb(0.45, 0.86, 1.0) : rgb(0.14, 0.18, 0.24)
+
         let blink: Float = sin(time * 8.0) > 0 ? 1.0 : 0.30
         switch signalState {
-        case 1: // Approach caution (pulsing amber)
+        case 1:
             signalLampMat.emission.contents = rgb(1.0 * blink, 0.68 * blink, 0.08)
             signalLampMat.diffuse.contents = rgb(1.0, 0.75, 0.16)
-        case 2: // Brake / Stop zone (bright flashing red!)
+        case 2:
             signalLampMat.emission.contents = rgb(1.0 * blink, 0.10 * blink, 0.08)
             signalLampMat.diffuse.contents = rgb(1.0, 0.18, 0.14)
-        case 3: // All aboard / Go (solid emerald green)
+        case 3:
             signalLampMat.emission.contents = rgb(0.16, 0.96, 0.38)
             signalLampMat.diffuse.contents = rgb(0.24, 1.0, 0.46)
         default:
@@ -776,83 +799,113 @@ final class CabDashboard {
             parent.addChildNode(n)
         }
 
-        // Windshield A-pillars & overhead sun visor (subtle cab framing, wide open sightline)
-        addBox(0.08, 1.05, 0.08, darkFrame, at: V3(-0.84, 0.0, -0.88), euler: V3(0, 0, -0.06))
-        addBox(0.08, 1.05, 0.08, darkFrame, at: V3(0.84, 0.0, -0.88), euler: V3(0, 0, 0.06))
-        addBox(1.82, 0.09, 0.12, darkFrame, at: V3(0, 0.485, -0.88))
-        addBox(1.76, 0.018, 0.04, trimMat, at: V3(0, 0.438, -0.84))
+        // Windshield A-pillars & overhead sun visor
+        addBox(0.075, 1.12, 0.08, darkFrame, at: V3(-0.88, 0.04, -0.92), euler: V3(0, 0, -0.05))
+        addBox(0.075, 1.12, 0.08, darkFrame, at: V3(0.88, 0.04, -0.92), euler: V3(0, 0, 0.05))
+        addBox(1.88, 0.09, 0.12, darkFrame, at: V3(0, 0.51, -0.92))
+        addBox(1.82, 0.016, 0.04, trimMat, at: V3(0, 0.464, -0.88))
 
-        // Main sloped control desk along the bottom of the windshield
-        addBox(1.88, 0.28, 0.34, deskMat, at: V3(0, -0.42, -0.88), euler: V3(0.24, 0, 0), chamfer: 0.02)
-        // Accent trim lip across top edge of console
-        addBox(1.80, 0.018, 0.03, trimMat, at: V3(0, -0.272, -0.96))
+        // Main sloped control desk raised cleanly into the lower-third safe zone (never cut off on TV!)
+        addBox(1.94, 0.34, 0.36, deskMat, at: V3(0, -0.355, -0.92), euler: V3(0.22, 0, 0), chamfer: 0.02)
+        // Lower skirt extending safely past the bottom edge for any screen aspect ratio
+        addBox(1.94, 0.26, 0.18, darkFrame, at: V3(0, -0.52, -0.86), chamfer: 0)
+        // Accent trim lip across the upper sill of the console
+        addBox(1.86, 0.018, 0.03, trimMat, at: V3(0, -0.175, -0.99))
 
-        // 1. Live Analog Speedometer & Power/Pressure Gauges
-        buildGauge(at: V3(-0.34, -0.325, -0.81), radius: 0.072, needlePivot: speedNeedlePivot,
+        // Twin automatic windshield wipers mounted right along the windshield sill
+        func buildWiper(_ pivot: SCNNode, at pos: V3) {
+            pivot.simdPosition = pos
+            let arm = SCNBox(width: 0.008, height: 0.24, length: 0.006, chamferRadius: 0)
+            arm.materials = [darkFrame]
+            let armNode = SCNNode(geometry: arm)
+            armNode.simdPosition = V3(0, 0.12, 0)
+            armNode.castsShadow = false
+            pivot.addChildNode(armNode)
+
+            let blade = SCNBox(width: 0.012, height: 0.19, length: 0.008, chamferRadius: 0)
+            blade.materials = [darkFrame]
+            let bladeNode = SCNNode(geometry: blade)
+            bladeNode.simdPosition = V3(0.008, 0.21, -0.003)
+            bladeNode.castsShadow = false
+            pivot.addChildNode(bladeNode)
+
+            let hub = SCNSphere(radius: 0.012); hub.segmentCount = 8
+            hub.materials = [chrome]
+            let hubNode = SCNNode(geometry: hub)
+            hubNode.castsShadow = false
+            pivot.addChildNode(hubNode)
+
+            pivot.simdEulerAngles = V3(0, 0, -1.28)
+            root.addChildNode(pivot)
+        }
+        buildWiper(wiperLeftPivot, at: V3(-0.22, -0.168, -0.985))
+        buildWiper(wiperRightPivot, at: V3(0.28, -0.168, -0.985))
+
+        // 1. Live Analog Speedometer & Power/Pressure Gauges (comfortably above bottom edge!)
+        buildGauge(at: V3(-0.34, -0.228, -0.85), radius: 0.066, needlePivot: speedNeedlePivot,
                    needleColor: rgb(1.0, 0.24, 0.16))
-        buildGauge(at: V3(-0.14, -0.325, -0.81), radius: 0.062, needlePivot: powerNeedlePivot,
+        buildGauge(at: V3(-0.15, -0.228, -0.85), radius: 0.058, needlePivot: powerNeedlePivot,
                    needleColor: rgb(1.0, 0.80, 0.16))
 
-        // 2. Central Illuminated Status Lamps (Signal / Horn / Brake / Headlight)
+        // 2. Central Illuminated Status Lamps (Signal / Brake / Horn / Headlight / Wipers)
         let lamps: [(x: Float, mat: SCNMaterial)] = [
-            (0.01, signalLampMat),
-            (0.065, brakeLampMat),
-            (0.12, hornLampMat),
-            (0.175, headlightLampMat),
+            (-0.02, signalLampMat),
+            (0.032, brakeLampMat),
+            (0.084, hornLampMat),
+            (0.136, headlightLampMat),
+            (0.188, wiperLampMat),
         ]
         for (lx, lMat) in lamps {
             lMat.lightingModel = .blinn
-            // Small raised bezel + glowing round dome lens
-            let bezel = SCNCylinder(radius: 0.019, height: 0.014); bezel.radialSegmentCount = 12
+            let bezel = SCNCylinder(radius: 0.017, height: 0.014); bezel.radialSegmentCount = 12
             bezel.materials = [trimMat]
             let bn = SCNNode(geometry: bezel)
-            bn.simdPosition = V3(lx, -0.312, -0.80)
+            bn.simdPosition = V3(lx, -0.212, -0.84)
             bn.simdEulerAngles = V3(1.15, 0, 0)
             bn.castsShadow = false
             root.addChildNode(bn)
 
-            let lens = SCNSphere(radius: 0.014); lens.segmentCount = 10
+            let lens = SCNSphere(radius: 0.0125); lens.segmentCount = 10
             lens.materials = [lMat]
             let ln = SCNNode(geometry: lens)
-            ln.simdPosition = V3(lx, -0.306, -0.793)
+            ln.simdPosition = V3(lx, -0.207, -0.833)
             ln.castsShadow = false
             root.addChildNode(ln)
         }
 
-        // Row of metallic toggle switches below the lamps
-        for i in 0..<4 {
-            let sx = 0.01 + Float(i) * 0.055
-            addBox(0.024, 0.030, 0.014, darkFrame, at: V3(sx, -0.365, -0.785), euler: V3(-0.35, 0, 0), chamfer: 0.002)
-            let toggle = SCNCylinder(radius: 0.004, height: 0.026); toggle.radialSegmentCount = 8
+        // Row of 5 metallic toggle switches right below the lamps
+        for i in 0..<5 {
+            let sx = -0.02 + Float(i) * 0.052
+            addBox(0.022, 0.028, 0.014, darkFrame, at: V3(sx, -0.268, -0.825), euler: V3(-0.35, 0, 0), chamfer: 0.002)
+            let toggle = SCNCylinder(radius: 0.0038, height: 0.024); toggle.radialSegmentCount = 8
             toggle.materials = [chrome]
             let tn = SCNNode(geometry: toggle)
-            tn.simdPosition = V3(sx, -0.362, -0.774)
+            tn.simdPosition = V3(sx, -0.265, -0.815)
             tn.simdEulerAngles = V3(i % 2 == 0 ? 1.25 : 0.75, 0, 0)
             tn.castsShadow = false
             root.addChildNode(tn)
         }
 
         // 3. Physical Moving Throttle / Brake Lever Quadrant on the right side of the console
-        let qPos = V3(0.32, -0.335, -0.80)
-        addBox(0.085, 0.022, 0.16, darkFrame, at: qPos, euler: V3(0.24, 0, 0), chamfer: 0.005)
-        // Green power & red brake slot accents
+        let qPos = V3(0.34, -0.245, -0.84)
+        addBox(0.085, 0.022, 0.16, darkFrame, at: qPos, euler: V3(0.22, 0, 0), chamfer: 0.005)
         let greenMat = SCNMaterial(); greenMat.lightingModel = .constant; greenMat.diffuse.contents = rgb(0.2, 0.88, 0.36)
         let redMat = SCNMaterial(); redMat.lightingModel = .constant; redMat.diffuse.contents = rgb(0.95, 0.22, 0.18)
-        addBox(0.012, 0.006, 0.065, greenMat, at: qPos + V3(-0.028, 0.016, -0.036), euler: V3(0.24, 0, 0), chamfer: 0)
-        addBox(0.012, 0.006, 0.055, redMat, at: qPos + V3(-0.028, 0.004, 0.038), euler: V3(0.24, 0, 0), chamfer: 0)
+        addBox(0.012, 0.006, 0.065, greenMat, at: qPos + V3(-0.028, 0.015, -0.036), euler: V3(0.22, 0, 0), chamfer: 0)
+        addBox(0.012, 0.006, 0.055, redMat, at: qPos + V3(-0.028, 0.003, 0.038), euler: V3(0.22, 0, 0), chamfer: 0)
 
         throttleLeverPivot.simdPosition = qPos + V3(0, 0.005, 0)
-        let shaft = SCNCylinder(radius: 0.007, height: 0.13); shaft.radialSegmentCount = 10
+        let shaft = SCNCylinder(radius: 0.007, height: 0.125); shaft.radialSegmentCount = 10
         shaft.materials = [chrome]
         let shaftNode = SCNNode(geometry: shaft)
-        shaftNode.simdPosition = V3(0, 0.065, 0)
+        shaftNode.simdPosition = V3(0, 0.062, 0)
         shaftNode.castsShadow = false
         throttleLeverPivot.addChildNode(shaftNode)
 
-        let handle = SCNCylinder(radius: 0.016, height: 0.075); handle.radialSegmentCount = 12
+        let handle = SCNCylinder(radius: 0.0155, height: 0.075); handle.radialSegmentCount = 12
         handle.materials = [knobMat]
         let handleNode = SCNNode(geometry: handle)
-        handleNode.simdPosition = V3(0, 0.13, 0)
+        handleNode.simdPosition = V3(0, 0.125, 0)
         handleNode.simdEulerAngles = V3(0, 0, .pi / 2)
         handleNode.castsShadow = false
         throttleLeverPivot.addChildNode(handleNode)

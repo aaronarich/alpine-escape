@@ -194,6 +194,7 @@ final class WeatherFX {
     private var cloudTime: Float = 0
 
     var rainLevel: Float { current.rain }
+    var snowLevel: Float { current.snow }
     var windLevel: Float { max(current.wind, current.snow * 0.5) }
     var onThunder: (() -> Void)?
 

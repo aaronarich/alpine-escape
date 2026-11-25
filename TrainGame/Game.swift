@@ -223,6 +223,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         buildTrainWash()
         buildRoadCrossings()
         buildApproachSignals()
+        buildTracksidePoles(material: sharedTrackMat)
     }
 
     private func mountTrain() {
@@ -823,6 +824,62 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// Adds rhythmic trackside wooden telegraph poles (Swiss Alps) or sleek overhead Shinkansen
+    /// steel catenary gantries (Tokyo) along open track to boost environmental detail and sense of speed.
+    private func buildTracksidePoles(material: SCNMaterial) {
+        var mesh = MeshBuilder()
+        let spacing: Float = theme == .tokyo ? 44 : 48
+        let woodCol = RGBA(0.36, 0.24, 0.14, 1)
+        let steelCol = RGBA(0.62, 0.65, 0.70, 1)
+        let insulatorCol = RGBA(0.86, 0.90, 0.94, 1)
+
+        var d: Float = 20
+        while d < track.length - 20 {
+            let clearOfLandmarks = !track.isInTunnel(d, margin: 18)
+                && !track.isInWash(d, margin: 16)
+                && !stations.contains(where: { abs(track.signedDelta(from: d, to: $0.distance - 43)) < 60 })
+                && !crossings.contains(where: { abs(track.signedDelta(from: d, to: $0.distance)) < 16 })
+
+            if clearOfLandmarks {
+                let f = track.frame(at: d)
+                if theme == .tokyo {
+                    // Sleek Japanese overhead catenary steel portal arching cleanly over the rails!
+                    for sx: Float in [-3.3, 3.3] {
+                        mesh.box(center: f.position + f.side * sx + f.up * 3.6,
+                                 side: f.side, up: f.up, forward: f.forward,
+                                 half: V3(0.16, 3.8, 0.16), color: steelCol, includeBottom: false)
+                    }
+                    mesh.box(center: f.position + f.up * 7.25,
+                             side: f.side, up: f.up, forward: f.forward,
+                             half: V3(3.55, 0.16, 0.16), color: steelCol, includeBottom: false)
+                    // Overhead contact wire hanger drop at track center
+                    mesh.box(center: f.position + f.up * 6.65,
+                             side: f.side, up: f.up, forward: f.forward,
+                             half: V3(0.08, 0.45, 0.08), color: insulatorCol, includeBottom: false)
+                } else if !track.isOnViaduct(d, margin: 10) {
+                    // Rustic alpine wooden telegraph pole with cross-arm & white ceramic insulators
+                    let base = f.position + f.side * 5.2
+                    mesh.box(center: base + f.up * 3.4, side: f.side, up: f.up, forward: f.forward,
+                             half: V3(0.14, 3.7, 0.14), color: woodCol, includeBottom: false)
+                    mesh.box(center: base + f.up * 6.5, side: f.side, up: f.up, forward: f.forward,
+                             half: V3(1.15, 0.10, 0.10), color: woodCol, includeBottom: false)
+                    for ix: Float in [-0.85, 0.85] {
+                        mesh.box(center: base + f.side * ix + f.up * 6.72,
+                                 side: f.side, up: f.up, forward: f.forward,
+                                 half: V3(0.08, 0.12, 0.08), color: insulatorCol, includeBottom: false)
+                    }
+                }
+            }
+            d += spacing
+        }
+
+        if !mesh.isEmpty {
+            let poleNode = SCNNode(geometry: mesh.geometry(doubleSided: false, material: material))
+            poleNode.castsShadow = false
+            worldRoot.addChildNode(poleNode)
+        }
+    }
+
     // MARK: Lifecycle & Debug
 
     func start(muted: Bool = false, liveWeather: Bool = true) {
@@ -915,9 +972,10 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         cabDashboard.root.isHidden = cameraMode != .cab
         if cameraMode == .cab {
             let lampOn = max(weatherFX.nightLevel, max(tunnelAmt, weatherFX.fogLevel * 0.65)) > 0.25
+            let precip = max(weatherFX.rainLevel, weatherFX.snowLevel) * max(0, 1 - tunnelAmt * 1.5)
             cabDashboard.update(dt: dt, speedNorm: speed / train.kind.maxSpeed, notch: notch,
                                 hornOn: commands.horn, headlightOn: lampOn,
-                                signalState: cabSignalState, time: time)
+                                signalState: cabSignalState, precipLevel: precip, time: time)
         }
         terrain.update(time: time, nightLevel: weatherFX.nightLevel, skyHorizon: weatherFX.currentSkyHorizon)
         for station in stations {
