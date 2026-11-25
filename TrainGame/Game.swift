@@ -118,6 +118,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
     private var time: Float = 0
     private var lastTime: TimeInterval?
     private var dwellUntil: Float?
+    private var autoStopping = false
     private var boardingCount = 0
     private var nextIndex = 0
     private var onboard = 0
@@ -262,6 +263,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         mountWorld()
         head = track.wrap(frac * track.length)
         dwellUntil = nil
+        autoStopping = false
         wasInWash = false
         if train.kind == .freight {
             assignNextCargoMission(from: nextIndex)
@@ -440,7 +442,12 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         let boreDark = RGBA(0.24, 0.23, 0.25, 1)
         let portalStone = theme == .tokyo ? RGBA(0.64, 0.66, 0.70, 1) : RGBA(0.55, 0.53, 0.49, 1)
         let portalTrim = theme == .tokyo ? RGBA(0.18, 0.62, 0.92, 1) : RGBA(0.68, 0.65, 0.60, 1)
-        let rockCap = theme == .tokyo ? RGBA(0.42, 0.44, 0.48, 1) : RGBA(0.38, 0.37, 0.35, 1)
+        let sleeveColor: RGBA
+        switch theme {
+        case .tokyo:     sleeveColor = RGBA(0.42, 0.44, 0.48, 1)
+        case .blueRidge: sleeveColor = RGBA(0.24, 0.42, 0.25, 1)
+        case .alps:      sleeveColor = RGBA(0.38, 0.37, 0.35, 1)
+        }
 
         let boreProfile: [SIMD2<Float>] = [
             SIMD2(-3.6, -0.5), SIMD2(-3.6, 4.4), SIMD2(-2.7, 6.5),
@@ -449,14 +456,39 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         ]
         mesh.ribbon(track: track, from: tStart, to: tEnd, step: 3.5, profile: boreProfile, color: boreDark, flip: true)
 
-        // Wide outer rock sleeves over the first & last 72m seamlessly bridge the hollow terrain portal cutouts.
-        let sleeveProfile: [SIMD2<Float>] = [
-            SIMD2(-19.0, -4.5), SIMD2(-11.0, 5.8), SIMD2(-5.2, 10.6),
-            SIMD2(0, 12.8),     SIMD2(5.2, 10.6),  SIMD2(11.0, 5.8),
-            SIMD2(19.0, -4.5),
+        // Tapered hillside sleeves over the first & last 74m seamlessly bridge the hollow terrain portal
+        // cutouts up into the mountain ridge so the hillside stays solid with zero transparent seams.
+        let sleeveBase: [SIMD2<Float>] = [
+            SIMD2(-26.0, -5.0), SIMD2(-16.0, 5.2), SIMD2(-6.2, 9.6),
+            SIMD2(0, 11.2),     SIMD2(6.2, 9.6),   SIMD2(16.0, 5.2),
+            SIMD2(26.0, -5.0),
         ]
-        mesh.ribbon(track: track, from: tStart + 0.4, to: tStart + 74, step: 4, profile: sleeveProfile, color: rockCap)
-        mesh.ribbon(track: track, from: tEnd - 74, to: tEnd - 0.4, step: 4, profile: sleeveProfile, color: rockCap)
+        func addTaperedSleeve(from d0: Float, to d1: Float, portalAtStart: Bool) {
+            let steps = 16
+            var prevRing: [V3] = []
+            for s in 0...steps {
+                let u = Float(s) / Float(steps)
+                let d = lerp(d0, d1, u)
+                let f = track.frame(at: d)
+                let depth = portalAtStart ? u : (1 - u)
+                let maxLift: Float = theme == .tokyo ? 16.0 : 22.0
+                let lift = smoothstep(0.08, 0.85, depth) * maxLift
+                var ring: [V3] = []
+                for (pi, pt) in sleeveBase.enumerated() {
+                    let crownWeight: Float = (pi == 0 || pi == sleeveBase.count - 1) ? 0.0
+                        : ((pi == 1 || pi == sleeveBase.count - 2) ? 0.45 : 1.0)
+                    ring.append(f.position + f.side * pt.x + f.up * (pt.y + lift * crownWeight))
+                }
+                if !prevRing.isEmpty {
+                    for k in 0..<(ring.count - 1) {
+                        mesh.quad(prevRing[k], ring[k], ring[k + 1], prevRing[k + 1], sleeveColor)
+                    }
+                }
+                prevRing = ring
+            }
+        }
+        addTaperedSleeve(from: tStart + 0.6, to: tStart + 74, portalAtStart: true)
+        addTaperedSleeve(from: tEnd - 74, to: tEnd - 0.6, portalAtStart: false)
 
         for (d, sign) in [(tStart, Float(-1)), (tEnd, Float(1))] {
             let f = track.frame(at: d)
@@ -954,6 +986,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             if let frac = debug.headFraction {
                 head = track.wrap(frac * track.length)
                 dwellUntil = nil
+                autoStopping = false
                 cameraSnap = true
             }
             if debug.triggerConfetti { confettiTrigger += 1 }
@@ -1224,8 +1257,61 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         if dwellUntil != nil {
             notch = min(notch, 0)
             speed = 0
+            autoStopping = false
             return
         }
+
+        // Smart Depot Auto-Stop Assist:
+        // When rolling into the next station with the throttle closed (notch <= 0), actively guide
+        // the train along a smooth speed curve right to the platform stop marker (delta = 0) so it
+        // never stops short or overshoots. Opening the throttle (notch > 0) immediately cancels
+        // auto-stop so the player can blow straight through the station whenever they want.
+        let station = stations[nextIndex]
+        let delta = track.signedDelta(from: head, to: station.distance)
+        let assistRange: Float = train.kind == .bullet ? 320 : 200
+        if notch > 0 || delta <= -Station.stopPast || delta >= assistRange {
+            autoStopping = false
+        } else if !autoStopping && speed > 0.25 {
+            autoStopping = true
+        }
+
+        if autoStopping {
+            if delta <= 1.2 && speed <= 1.8 {
+                speed = 0
+                notch = 0
+                autoStopping = false
+                return
+            }
+            if delta <= 0 {
+                // Slightly past the marker but still inside the stop zone: stop promptly.
+                let brake = train.kind.maxBrake * 1.6
+                speed = max(0, speed - brake * dt)
+                if speed < 0.8 {
+                    speed = 0
+                    notch = 0
+                    autoStopping = false
+                }
+            } else {
+                // Smooth kinematic glide right to delta = 0:
+                // - Brakes smoothly if approaching fast (never overshooting)
+                // - Gently glides forward if the player braked too early (never stopping short)
+                let aComfort: Float = train.kind == .bullet ? 2.4 : 1.45
+                let curveSpeed = sqrt(2.0 * aComfort * delta)
+                let targetSpeed = min(curveSpeed, max(speed, 7.5))
+                if speed > curveSpeed {
+                    let neededDecel = (speed * speed) / (2.0 * max(delta, 0.4))
+                    let decel = clamp(neededDecel * 1.08, 0.35, train.kind.maxBrake * 1.65)
+                    speed = max(0, speed - decel * dt)
+                } else {
+                    let accel = clamp((targetSpeed - speed) * 1.4, -aComfort, 2.4)
+                    speed = max(0, speed + accel * dt)
+                }
+            }
+            head = track.wrap(head + speed * dt)
+            odometer += speed * dt
+            return
+        }
+
         var acceleration: Float = 0
         if notch > 0 {
             acceleration = Float(notch) / Float(Game.maxNotch) * train.kind.maxAcceleration * max(0, 1 - speed / train.kind.maxSpeed)
@@ -1239,26 +1325,6 @@ final class Game: NSObject, SCNSceneRendererDelegate {
         if speed > 0 {
             let drag: Float = train.kind == .bullet ? 0.00028 : 0.0006
             acceleration -= 0.03 + drag * speed * speed
-        }
-
-        // Smart Depot Auto-Stop Assist:
-        // When rolling into the next station with the throttle closed (notch <= 0), gently guide the
-        // train to a smooth stop right inside the platform stop zone. If throttle is open (notch > 0),
-        // the player can blow straight through the station undisturbed!
-        if notch <= 0 && speed > 0 {
-            let station = stations[nextIndex]
-            let delta = track.signedDelta(from: head, to: station.distance)
-            let assistRange: Float = train.kind == .bullet ? 260 : 165
-            if delta > -Station.stopPast && delta < assistRange {
-                let targetDist = max(delta - 2.0, 1.5)
-                let idealDecel = (speed * speed) / (2.0 * targetDist)
-                let assistBrake = clamp(idealDecel * 1.15, 0.45, train.kind.maxBrake * 1.5)
-                acceleration = min(acceleration, -assistBrake)
-                if delta <= Station.stopShort && speed < 1.1 {
-                    speed = 0
-                    acceleration = 0
-                }
-            }
         }
 
         speed = max(0, speed + acceleration * dt)
@@ -1474,10 +1540,10 @@ final class Game: NSObject, SCNSceneRendererDelegate {
             state.banner = message.text
         } else if dwellUntil != nil {
             state.banner = train.kind == .freight ? "\(station.name) · loading cargo" : "\(station.name) · doors open"
-        } else if delta <= Station.stopShort && speed > 0.05 {
-            state.banner = notch <= 0 ? "🟢 Stopping at \(station.name)…" : "🟢 Stop here!"
-        } else if delta < 155 && speed > 1.5 && notch <= 0 {
+        } else if autoStopping {
             state.banner = "🟢 Auto-stopping at \(station.name)…"
+        } else if delta <= Station.stopShort && speed > 0.05 {
+            state.banner = "🟢 Stop here!"
         } else if delta < 145 && speed > 3.5 {
             state.banner = "🔴 Brake now for \(station.name)!"
         } else if delta < (train.kind == .bullet ? 480 : 320) && speed > 6 {

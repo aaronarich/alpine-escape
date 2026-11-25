@@ -219,18 +219,19 @@ final class Terrain {
     }
 
     /// Returns true if a heightmap triangle slices vertically across either tunnel opening.
-    /// Skipping these triangles creates a genuinely hollow 3D portal (covered externally by the rock sleeve).
+    /// Skipping only the narrow bore-crossing triangles creates a genuinely hollow 3D portal
+    /// while keeping the surrounding mountainside completely solid (bridged by the tapered sleeve).
     private func blocksTunnelPortal(_ a: V3, _ b: V3, _ c: V3) -> Bool {
         let center = (a + b + c) / 3
         let near = track.nearest(x: center.x, z: center.z)
-        guard near.distance < 17 else { return false }
-        let inStartZone = near.along >= track.tunnel.start - 4 && near.along <= track.tunnel.start + 66
-        let inEndZone = near.along >= track.tunnel.end - 66 && near.along <= track.tunnel.end + 4
+        guard near.distance < 10.5 else { return false }
+        let inStartZone = near.along >= track.tunnel.start - 2 && near.along <= track.tunnel.start + 54
+        let inEndZone = near.along >= track.tunnel.end - 54 && near.along <= track.tunnel.end + 2
         guard inStartZone || inEndZone else { return false }
         let minY = min(a.y, min(b.y, c.y))
         let maxY = max(a.y, max(b.y, c.y))
         // Only cut triangles that pass through the tunnel bore elevation (keep flat ground below and mountain peak above).
-        return maxY > near.y - 0.3 && minY < near.y + 9.5
+        return maxY > near.y - 0.2 && minY < near.y + 8.5
     }
 
     private func groundColor(_ a: V3, _ b: V3, _ c: V3) -> RGBA {
@@ -426,7 +427,7 @@ final class Terrain {
             guard Noise.fbm(x * 0.011 + 3, z * 0.011 + 9, octaves: 2) > 0.43 else { continue }
 
             let near = track.nearest(x: x, z: z)
-            let onTunnelRoof = track.isInTunnel(near.along) && h > near.y + 14
+            let onTunnelRoof = near.along > track.tunnel.start + 66 && near.along < track.tunnel.end - 66 && h > near.y + 18
             if !onTunnelRoof {
                 guard near.distance > 16 else { continue }
                 if near.distance < 32 && stationDistances.contains(where: { abs(track.signedDelta(from: near.along, to: $0 - 43)) < 58 }) { continue }
@@ -627,7 +628,7 @@ final class Terrain {
             guard Noise.fbm(x * 0.010 + 5, z * 0.010 + 13, octaves: 2) > 0.36 else { continue }
 
             let near = track.nearest(x: x, z: z)
-            let onTunnelRoof = track.isInTunnel(near.along) && h > near.y + 14
+            let onTunnelRoof = near.along > track.tunnel.start + 66 && near.along < track.tunnel.end - 66 && h > near.y + 18
             if !onTunnelRoof {
                 guard near.distance > 16 else { continue }
                 if near.distance < 32 && stationDistances.contains(where: { abs(track.signedDelta(from: near.along, to: $0 - 43)) < 58 }) { continue }

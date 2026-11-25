@@ -44,8 +44,8 @@ final class Station {
     static let platformBack: Float = -92
     static let platformFront: Float = 6
     /// How far short of / past the marker the front of the train may stop and still count.
-    static let stopShort: Float = 20
-    static let stopPast: Float = 5
+    static let stopShort: Float = 32
+    static let stopPast: Float = 12
 
     let name: String
     let distance: Float
