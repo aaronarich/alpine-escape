@@ -499,7 +499,7 @@ final class Game: NSObject, SCNSceneRendererDelegate {
 
         audio.update(speed: speed, power: power, brake: brake, hornOn: commands.horn,
                      rain: weatherFX.rainLevel, wind: weatherFX.windLevel,
-                     viaduct: viaductAmt, tunnel: tunnelAmt)
+                     night: weatherFX.nightLevel, viaduct: viaductAmt, tunnel: tunnelAmt)
 
         publishHUD(dt: dt, mode: mode, kind: kind, timeMode: timeMode, live: live)
     }
